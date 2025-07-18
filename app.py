@@ -363,8 +363,8 @@ def auto_clean_data(df):
     df = clean_price_columns(df)
     return df
 
-RAW_CSV = 'bd_20250708_131602_0.csv'
-CLEANED_CSV = 'cleaned_data.csv'
+RAW_CSV = 'https://github.com/Uglamator/zalandoData/releases/download/v1.0/bd_20250708_131602_0.csv'
+CLEANED_CSV = 'https://github.com/Uglamator/zalandoData/releases/download/v1.0/cleaned_data.csv'
 
 def ensure_cleaned_data():
     """
