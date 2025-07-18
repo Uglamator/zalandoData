@@ -1,6 +1,7 @@
 pandas
 beautifulsoup4
-cloudscraper
-requests
 selenium
+requests
 streamlit
+plotly
+numpy
