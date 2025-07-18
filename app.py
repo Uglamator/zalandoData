@@ -372,8 +372,8 @@ def ensure_cleaned_data():
     """
 
     raw_df = pd.read_csv(RAW_CSV)
-    cleaned_df = auto_clean_data(raw_df)
-    cleaned_df.to_csv(CLEANED_CSV, index=False)
+    #cleaned_df = auto_clean_data(raw_df)
+    #cleaned_df.to_csv(CLEANED_CSV, index=False)
 
 @st.cache_data
 def load_data():
