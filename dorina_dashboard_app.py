@@ -377,16 +377,29 @@ def ensure_cleaned_data():
     """
     st.info('Cleaning raw data, please wait...')
     raw_df = pd.read_csv(RAW_CSV)
-    cleaned_df = auto_clean_data(raw_df)
+    #cleaned_df = auto_clean_data(raw_df)
     #cleaned_df.to_csv(CLEANED_CSV, index=False)
     st.success('Data cleaned and saved to cleaned_data.csv!')
 
 @st.cache_data
 def load_data():
-    ensure_cleaned_data()
-    df = pd.read_csv(CLEANED_CSV)
-    df = auto_clean_data(df)
-    return df
+    """
+    Loads the already-cleaned data directly from a GitHub Release URL.
+    """
+    # Paste the NEW link to your CLEAN data file here
+    data_url = 'YOUR_NEW_LINK_HERE'
+
+    st.info('Loading data...')
+
+    try:
+        # Read the clean data directly from the URL
+        df = pd.read_csv(data_url)
+        st.success('Data ready!')
+        return df
+
+    except Exception as e:
+        st.error(f"Failed to load data from URL. Error: {e}")
+        return pd.DataFrame()
 
 def highlight_dorina(row):
     brand = row['brand_clean'] if 'brand_clean' in row else ''
