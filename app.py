@@ -365,7 +365,7 @@ def auto_clean_data(df):
     df = clean_price_columns(df)
     return df
 
-RAW_CSV = 'https://github.com/Uglamator/zalandoData/releases/download/v1.0/bd_20250708_131602_0.csv'
+RAW_CSV = 'https://raw.githubusercontent.com/Uglamator/zalandoData/main/bd_20250708_131602_0.csv'
 
 
 @st.cache_data # Cache the entire process: download, clean, and return DataFrame
