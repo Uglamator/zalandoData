@@ -365,13 +365,13 @@ def auto_clean_data(df):
     df = clean_price_columns(df)
     return df
 
-RAW_CSV = 'https://raw.githubusercontent.com/Uglamator/zalandoData/main/bd_20250708_131602_0.csv'
+RAW_CSV = 'https://raw.githubusercontent.com/Uglamator/zalandoData/main/cleaned_zalando_data.csv'
 
 
-@st.cache_data # Cache the entire process: download, clean, and return DataFrame
+@st.cache_data # Cache the data loading process
 def load_data():
     """
-    Downloads the raw data from GitHub, cleans it, and returns a DataFrame.
+    Downloads the pre-cleaned data from GitHub and returns a DataFrame.
     The result is cached to prevent re-downloading on every interaction.
     """
     try:
@@ -379,11 +379,8 @@ def load_data():
         response = requests.get(RAW_CSV)
         response.raise_for_status()  # Raise an exception for bad responses (4xx or 5xx)
 
-        # Read the raw CSV content into a DataFrame
-        raw_df = pd.read_csv(io.StringIO(response.text))
-
-        # Perform all cleaning operations on the raw data
-        cleaned_df = auto_clean_data(raw_df)
+        # Read the cleaned CSV content directly into a DataFrame
+        cleaned_df = pd.read_csv(io.StringIO(response.text))
         
         return cleaned_df
 
