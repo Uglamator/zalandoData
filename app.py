@@ -1008,8 +1008,19 @@ def all_dorina_products_table(df):
     st.markdown("---")
     st.header("All Dorina Products Table (Filterable)")
     dorina_df = df[df['brand_clean'].str.contains('Dorina', case=False, na=False)]
+    
+    # Define columns to display
+    display_columns = [
+        'best_name', 'category_clean', 'specific_category', 
+        'final_price', 'price_per_item', 'pack_size', 'discount_pct', 
+        'inventory', 'country_code'
+    ]
+    
+    # Filter dorina_df to only include available columns
+    available_columns = [col for col in display_columns if col in dorina_df.columns]
+    
     styled = smart_style(
-        dorina_df[['best_name', 'category_clean', 'specific_category', 'final_price', 'price_per_item', 'discount_pct', 'inventory', 'country_code']]
+        dorina_df[available_columns]
         .sort_values(['category_clean', 'specific_category'])
     )
     st.dataframe(styled, use_container_width=True)
