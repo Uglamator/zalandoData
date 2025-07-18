@@ -17,7 +17,7 @@ MAIN_CATEGORY_MAP = {
     'bh': 'Bras', 'bra': 'Bras', 'buegel': 'Bras', 'underwired': 'Bras', 'triangle': 'Bras', 'soft': 'Bras',
     'push': 'Bras', 't-shirt': 'Bras', 'balcony': 'Bras', 'balconette': 'Bras',
     'strapless': 'Bras', 'plunge': 'Bras', 'wireless': 'Bras', 'bralette': 'Bras', 'minimizer': 'Bras',
-    'maternity': 'Bras', 'multiway': 'Bras',
+    'maternity': 'Bras', 'multiway': 'Bras', 'bustier': 'Bras',
 
     # Underwear
     'briefs': 'Underwear', 'brief': 'Underwear', 'panties': 'Underwear', 'panty': 'Underwear',
@@ -27,7 +27,7 @@ MAIN_CATEGORY_MAP = {
 
     # Bodysuits & Corsetry
     'body': 'Bodysuits & Corsetry', 'bodysuit': 'Bodysuits & Corsetry', 'bodies': 'Bodysuits & Corsetry',
-    'bustier': 'Bodysuits & Corsetry', 'corset': 'Bodysuits & Corsetry',
+    'corset': 'Bodysuits & Corsetry',
 
     # Shapewear
     'shapewear': 'Shapewear', 'girdle': 'Shapewear',
@@ -394,6 +394,32 @@ def auto_clean_data(df):
     df = clean_category_columns(df)
     df = clean_color_column(df)
     df = clean_price_columns(df)
+    df = adjust_for_pack_size(df)
+    return df
+
+def adjust_for_pack_size(df):
+    """
+    Extracts pack size from product name and calculates price per item.
+    """
+    # Regex to find patterns like "3 PACK", "3ER PACK", "3-PACK", "3x"
+    pack_regex = re.compile(r'(\d+)\s*(?:pack|er pack|-pack|x)', re.IGNORECASE)
+
+    def get_pack_size(name):
+        if not isinstance(name, str):
+            return 1
+        match = pack_regex.search(name)
+        if match:
+            # Ensure the pack size is a reasonable number to avoid errors with product codes
+            pack_size = int(match.group(1))
+            return pack_size if pack_size > 0 and pack_size < 20 else 1
+        return 1
+
+    # Apply the function to the 'best_name' column
+    df['pack_size'] = df['best_name'].apply(get_pack_size)
+
+    # Calculate price_per_item, ensuring we don't divide by zero
+    df['price_per_item'] = df['final_price'] / df['pack_size'].where(df['pack_size'] > 0, 1)
+    
     return df
 
 RAW_CSV = 'https://raw.githubusercontent.com/Uglamator/zalandoData/main/cleaned_zalando_data.csv'
@@ -484,7 +510,7 @@ def dashboard_tab(df):
     discounted = (filtered['discount_pct'] > 0).sum()
     pct_discounted = (discounted / total_skus * 100) if total_skus > 0 else 0
     avg_discount = filtered.loc[filtered['discount_pct'] > 0, 'discount_pct'].mean() if discounted > 0 else 0
-    avg_price = filtered['final_price'].mean()
+    avg_price = filtered['price_per_item'].mean()
     n_brands = filtered['brand_clean'].nunique()
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("Total SKUs", f"{total_skus:,}")
@@ -514,7 +540,7 @@ def dashboard_tab(df):
         st.markdown("**Price Band Mix**")
         price_bins = [0, 20, 30, 40, 50, 60, 1e6]
         price_labels = ['<20€', '20-30€', '30-40€', '40-50€', '50-60€', '60€+']
-        price_band = pd.cut(filtered['final_price'], bins=price_bins, labels=price_labels, right=False)
+        price_band = pd.cut(filtered['price_per_item'], bins=price_bins, labels=price_labels, right=False)
         price_counts = price_band.value_counts().reindex(price_labels, fill_value=0)
         st.plotly_chart(px.bar(x=price_labels, y=price_counts.values, labels={'x': 'Price Band', 'y': 'SKUs'}), use_container_width=True)
     with colC:
@@ -579,6 +605,33 @@ def dashboard_tab(df):
         st.info("Select a subcategory below to see brand, color, and price analytics for that subcategory.")
         deep_dive_by_specific_category(filtered)
 
+    # --- Pack Analysis Section ---
+    st.markdown("---")
+    st.header("Pack Analysis")
+
+    # Filter for products sold in packs
+    packs_df = filtered[filtered['pack_size'] > 1].copy()
+
+    if not packs_df.empty:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Distribution of Pack Sizes**")
+            pack_counts = packs_df['pack_size'].value_counts().sort_index()
+            st.plotly_chart(px.bar(pack_counts, 
+                                   x=pack_counts.index, 
+                                   y=pack_counts.values, 
+                                   labels={'x': 'Pack Size', 'y': 'Number of SKUs'}),
+                            use_container_width=True)
+
+        with col2:
+            st.markdown("**Top 10 Brands Selling in Packs**")
+            brand_pack_counts = packs_df['brand_clean'].value_counts().head(10)
+            st.dataframe(brand_pack_counts.reset_index().rename(columns={'index': 'Brand', 'brand_clean': 'SKU Count'}),
+                         use_container_width=True)
+    else:
+        st.info("No products sold in packs match the current filter criteria.")
+
 def virtual_shopping_room(df):
     """
     Redesigned Product Finder for buyers: quick filters, summary panels, and a product gallery.
@@ -605,14 +658,14 @@ def virtual_shopping_room(df):
         else:
             selected_colors = []
     # --- Price Range Slider (capped at 60 EUR, 60+ means everything above) ---
-    min_price = float(df['final_price'].min())
-    max_slider = 60.0 if df['final_price'].max() > 60 else float(df['final_price'].max())
+    min_price = float(df['price_per_item'].min())
+    max_slider = 60.0 if df['price_per_item'].max() > 60 else float(df['price_per_item'].max())
     price_range = st.slider("Price Range (€)", min_value=min_price, max_value=max_slider, value=(min_price, max_slider), step=1.0)
     filtered = df.copy()
     if price_range[1] == max_slider and max_slider == 60.0:
-        filtered = filtered[(filtered['final_price'] >= price_range[0])]
+        filtered = filtered[(filtered['price_per_item'] >= price_range[0])]
     else:
-        filtered = filtered[(filtered['final_price'] >= price_range[0]) & (filtered['final_price'] <= price_range[1])]
+        filtered = filtered[(filtered['price_per_item'] >= price_range[0]) & (filtered['price_per_item'] <= price_range[1])]
     # --- Filtering ---
     if selected_category != 'All':
         filtered = filtered[filtered['category_clean'] == selected_category]
@@ -731,7 +784,7 @@ def executive_summary(df):
     col1, col2, col3, col4 = st.columns(4)
     dorina_df = df[df['brand_clean'].str.contains('Dorina', case=False, na=False)]
     col1.metric("Total Products (Dorina)", f"{len(dorina_df):,}")
-    col2.metric("Avg Price (Dorina)", f"€{dorina_df['final_price'].mean():.2f}")
+    col2.metric("Avg Price (Dorina)", f"€{dorina_df['price_per_item'].mean():.2f}")
     col3.metric("Avg Discount (Dorina)", f"{dorina_df['discount_pct'].mean():.2f}%")
     col4.metric("Categories", f"{dorina_df['category_clean'].nunique()}")
 
@@ -766,8 +819,8 @@ def average_price_by_brand(df):
     top_brands_by_count = df['brand_clean'].value_counts().head(15).index.tolist()
     if 'Dorina' not in [b.title() for b in top_brands_by_count]:
         top_brands_by_count.append('Dorina')
-    brand_prices = df[df['brand_clean'].isin(top_brands_by_count)].groupby('brand_clean')['final_price'].mean().reindex(top_brands_by_count)
-    dorina_price = df[df['brand_clean'].str.lower() == 'dorina']['final_price'].mean()
+    brand_prices = df[df['brand_clean'].isin(top_brands_by_count)].groupby('brand_clean')['price_per_item'].mean().reindex(top_brands_by_count)
+    dorina_price = df[df['brand_clean'].str.lower() == 'dorina']['price_per_item'].mean()
     brand_prices = brand_prices.fillna(dorina_price)
     fig2 = px.bar(
         x=brand_prices.index,
@@ -797,7 +850,7 @@ def category_deep_dives(df):
     # --- KPI Tiles ---
     total_skus = len(filtered)
     n_brands = filtered['brand_clean'].nunique()
-    avg_price = filtered['final_price'].mean()
+    avg_price = filtered['price_per_item'].mean()
     discounted = (filtered['discount_pct'] > 0).sum()
     pct_discounted = (discounted / total_skus * 100) if total_skus > 0 else 0
     avg_discount = filtered.loc[filtered['discount_pct'] > 0, 'discount_pct'].mean() if discounted > 0 else 0
@@ -813,7 +866,7 @@ def category_deep_dives(df):
     top_brands = brand_counts.head(10).index.tolist()
     if selected_brand != 'All' and selected_brand not in top_brands:
         top_brands.append(selected_brand)
-    avg_price_by_brand = cat_df[cat_df['brand_clean'].isin(top_brands)].groupby('brand_clean')['final_price'].mean().reindex(top_brands)
+    avg_price_by_brand = cat_df[cat_df['brand_clean'].isin(top_brands)].groupby('brand_clean')['price_per_item'].mean().reindex(top_brands)
     highlight_color = ['#e74c3c' if b == selected_brand else '#3498db' for b in avg_price_by_brand.index]
     fig_price = px.bar(x=avg_price_by_brand.index, y=avg_price_by_brand.values, color=avg_price_by_brand.index,
                       color_discrete_sequence=highlight_color,
@@ -842,8 +895,8 @@ def category_deep_dives(df):
     st.markdown("**Price Band Mix**")
     price_bins = [0, 20, 30, 40, 50, 60, 1e6]
     price_labels = ['<20€', '20-30€', '30-40€', '40-50€', '50-60€', '60€+']
-    brand_band = pd.cut(filtered['final_price'], bins=price_bins, labels=price_labels, right=False)
-    cat_band = pd.cut(cat_df['final_price'], bins=price_bins, labels=price_labels, right=False)
+    brand_band = pd.cut(filtered['price_per_item'], bins=price_bins, labels=price_labels, right=False)
+    cat_band = pd.cut(cat_df['price_per_item'], bins=price_bins, labels=price_labels, right=False)
     band_df = pd.DataFrame({selected_brand: brand_band.value_counts(normalize=True).reindex(price_labels, fill_value=0),
                            'Category': cat_band.value_counts(normalize=True).reindex(price_labels, fill_value=0)}, index=price_labels)
     fig_band = px.bar(band_df.reset_index(), x='index', y=[selected_brand, 'Category'], barmode='group',
@@ -879,7 +932,7 @@ def deep_dive_by_specific_category(df):
     # --- KPI Tiles ---
     total_skus = len(filtered)
     n_brands = filtered['brand_clean'].nunique()
-    avg_price = filtered['final_price'].mean()
+    avg_price = filtered['price_per_item'].mean()
     discounted = (filtered['discount_pct'] > 0).sum()
     pct_discounted = (discounted / total_skus * 100) if total_skus > 0 else 0
     avg_discount = filtered.loc[filtered['discount_pct'] > 0, 'discount_pct'].mean() if discounted > 0 else 0
@@ -895,7 +948,7 @@ def deep_dive_by_specific_category(df):
     top_brands = brand_counts.head(10).index.tolist()
     if selected_brand != 'All' and selected_brand not in top_brands:
         top_brands.append(selected_brand)
-    avg_price_by_brand = subcat_df[subcat_df['brand_clean'].isin(top_brands)].groupby('brand_clean')['final_price'].mean().reindex(top_brands)
+    avg_price_by_brand = subcat_df[subcat_df['brand_clean'].isin(top_brands)].groupby('brand_clean')['price_per_item'].mean().reindex(top_brands)
     highlight_color = ['#e74c3c' if b == selected_brand else '#3498db' for b in avg_price_by_brand.index]
     fig_price = px.bar(x=avg_price_by_brand.index, y=avg_price_by_brand.values, color=avg_price_by_brand.index,
                       color_discrete_sequence=highlight_color,
@@ -921,8 +974,8 @@ def deep_dive_by_specific_category(df):
     st.markdown("**Price Band Mix**")
     price_bins = [0, 20, 30, 40, 50, 60, 1e6]
     price_labels = ['<20€', '20-30€', '30-40€', '40-50€', '50-60€', '60€+']
-    brand_band = pd.cut(filtered['final_price'], bins=price_bins, labels=price_labels, right=False)
-    subcat_band = pd.cut(subcat_df['final_price'], bins=price_bins, labels=price_labels, right=False)
+    brand_band = pd.cut(filtered['price_per_item'], bins=price_bins, labels=price_labels, right=False)
+    subcat_band = pd.cut(subcat_df['price_per_item'], bins=price_bins, labels=price_labels, right=False)
     band_df = pd.DataFrame({selected_brand: brand_band.value_counts(normalize=True).reindex(price_labels, fill_value=0),
                            'Subcategory': subcat_band.value_counts(normalize=True).reindex(price_labels, fill_value=0)}, index=price_labels)
     fig_band = px.bar(band_df.reset_index(), x='index', y=[selected_brand, 'Subcategory'], barmode='group',
@@ -950,7 +1003,7 @@ def all_dorina_products_table(df):
     st.header("All Dorina Products Table (Filterable)")
     dorina_df = df[df['brand_clean'].str.contains('Dorina', case=False, na=False)]
     styled = smart_style(
-        dorina_df[['best_name', 'category_clean', 'specific_category', 'final_price', 'discount_pct', 'inventory', 'country_code']]
+        dorina_df[['best_name', 'category_clean', 'specific_category', 'price_per_item', 'discount_pct', 'inventory', 'country_code']]
         .sort_values(['category_clean', 'specific_category'])
     )
     st.dataframe(styled, use_container_width=True)
@@ -983,14 +1036,14 @@ def zalando_performance_tab(df):
     st.markdown("---")
     # ASP by Main Category
     st.subheader("Average Selling Price (ASP) by Main Category")
-    cat_asp = df.groupby('category_clean')['final_price'].mean().round(2).sort_values(ascending=False)
+    cat_asp = df.groupby('category_clean')['price_per_item'].mean().round(2).sort_values(ascending=False)
     st.bar_chart(cat_asp)
-    st.dataframe(cat_asp.reset_index().rename(columns={'final_price': 'ASP (€)'}).round(2), use_container_width=True)
+    st.dataframe(cat_asp.reset_index().rename(columns={'price_per_item': 'ASP (€)'}).round(2), use_container_width=True)
     # ASP by Specific Category
     st.subheader("Average Selling Price (ASP) by Specific Category (Top 20)")
-    subcat_asp = df.groupby('specific_category')['final_price'].mean().round(2).sort_values(ascending=False).head(20)
+    subcat_asp = df.groupby('specific_category')['price_per_item'].mean().round(2).sort_values(ascending=False).head(20)
     st.bar_chart(subcat_asp)
-    st.dataframe(subcat_asp.reset_index().rename(columns={'final_price': 'ASP (€)'}).round(2), use_container_width=True)
+    st.dataframe(subcat_asp.reset_index().rename(columns={'price_per_item': 'ASP (€)'}).round(2), use_container_width=True)
     st.markdown("---")
     # By Main Category
     st.subheader("Average Discount by Main Category")
@@ -1049,13 +1102,13 @@ def brand_comparison_tab(df):
 
     # ASP Comparison
     st.subheader("Average Selling Price (ASP) by Main Category")
-    asp = comp_df.groupby(['category_clean', 'brand_clean'])['final_price'].mean().reset_index()
-    fig_asp = px.bar(asp, x='category_clean', y='final_price', color='brand_clean', barmode='group', labels={'final_price': 'ASP (€)', 'category_clean': 'Main Category', 'brand_clean': 'Brand'})
+    asp = comp_df.groupby(['category_clean', 'brand_clean'])['price_per_item'].mean().reset_index()
+    fig_asp = px.bar(asp, x='category_clean', y='price_per_item', color='brand_clean', barmode='group', labels={'price_per_item': 'ASP (€)', 'category_clean': 'Main Category', 'brand_clean': 'Brand'})
     col1, col2 = st.columns(2)
     with col1:
         st.plotly_chart(fig_asp, use_container_width=True)
     with col2:
-        st.dataframe(asp.pivot(index='category_clean', columns='brand_clean', values='final_price').round(2).fillna(0), use_container_width=True)
+        st.dataframe(asp.pivot(index='category_clean', columns='brand_clean', values='price_per_item').round(2).fillna(0), use_container_width=True)
 
     # Discount Comparison
     st.subheader("Average Discount (%) by Main Category")
@@ -1246,7 +1299,7 @@ def brand_performance_tab(df):
     st.subheader("Brand Summary Stats")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Products", f"{len(brand_df):,}")
-    col2.metric("Avg Price", f"€{brand_df['final_price'].mean():.2f}")
+    col2.metric("Avg Price", f"€{brand_df['price_per_item'].mean():.2f}")
     col3.metric("Avg Discount", f"{brand_df['discount_pct'].mean():.2f}%")
     col4.metric("# Categories", f"{brand_df['category_clean'].nunique()}")
 
