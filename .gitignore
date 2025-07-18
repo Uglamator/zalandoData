@@ -62,7 +62,6 @@ coverage.xml
 .pyre/
 
 # Data files
-*.csv
 *.tsv
 *.xls
 *.xlsx
