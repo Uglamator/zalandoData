@@ -369,7 +369,7 @@ def auto_clean_data(df):
     return df
 
 RAW_CSV = 'https://github.com/Uglamator/zalandoData/releases/download/v1.0/bd_20250708_131602_0.csv'
-CLEANED_CSV = 'cleaned_data.csv'
+CLEANED_CSV = 'https://github.com/Uglamator/zalandoData/releases/download/v1.0/cleaned_data.csv'
 
 def ensure_cleaned_data():
     """
@@ -378,7 +378,7 @@ def ensure_cleaned_data():
     st.info('Cleaning raw data, please wait...')
     raw_df = pd.read_csv(RAW_CSV)
     cleaned_df = auto_clean_data(raw_df)
-    cleaned_df.to_csv(CLEANED_CSV, index=False)
+    #cleaned_df.to_csv(CLEANED_CSV, index=False)
     st.success('Data cleaned and saved to cleaned_data.csv!')
 
 @st.cache_data
