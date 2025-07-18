@@ -952,7 +952,7 @@ def zalando_performance_tab(df):
     st.markdown("---")
     # ASP by Main Category
     st.subheader("Average Selling Price (ASP) by Main Category")
-    cat_asp = df.groupby('main_category')['final_price'].mean().round(2).sort_values(ascending=False)
+    cat_asp = df.groupby('category_clean')['final_price'].mean().round(2).sort_values(ascending=False)
     st.bar_chart(cat_asp)
     st.dataframe(cat_asp.reset_index().rename(columns={'final_price': 'ASP (€)'}).round(2), use_container_width=True)
     # ASP by Specific Category
@@ -963,7 +963,7 @@ def zalando_performance_tab(df):
     st.markdown("---")
     # By Main Category
     st.subheader("Average Discount by Main Category")
-    cat_discount = df.groupby('main_category')['discount_pct'].mean().round(2).sort_values(ascending=False)
+    cat_discount = df.groupby('category_clean')['discount_pct'].mean().round(2).sort_values(ascending=False)
     st.bar_chart(cat_discount)
     st.dataframe(cat_discount.reset_index().rename(columns={'discount_pct': 'Avg Discount (%)'}).round(2), use_container_width=True)
     # By Brand
@@ -978,7 +978,7 @@ def zalando_performance_tab(df):
     st.dataframe(subcat_discount.reset_index().rename(columns={'discount_pct': 'Avg Discount (%)'}).round(2), use_container_width=True)
     # Summary Table
     st.subheader("Discount Summary Table (Category x Brand)")
-    summary = df.pivot_table(index='main_category', columns='brand_clean', values='discount_pct', aggfunc='mean').round(2)
+    summary = df.pivot_table(index='category_clean', columns='brand_clean', values='discount_pct', aggfunc='mean').round(2)
     st.dataframe(summary, use_container_width=True)
 
 def brand_comparison_tab(df):
@@ -996,13 +996,13 @@ def brand_comparison_tab(df):
 
     # Product Count by Main Category
     st.subheader("Product Count by Main Category")
-    cat_counts = comp_df.groupby(['main_category', 'brand_clean']).size().reset_index(name='count')
-    fig_cat = px.bar(cat_counts, x='main_category', y='count', color='brand_clean', barmode='group', labels={'count': 'Product Count', 'main_category': 'Main Category', 'brand_clean': 'Brand'})
+    cat_counts = comp_df.groupby(['category_clean', 'brand_clean']).size().reset_index(name='count')
+    fig_cat = px.bar(cat_counts, x='category_clean', y='count', color='brand_clean', barmode='group', labels={'count': 'Product Count', 'category_clean': 'Main Category', 'brand_clean': 'Brand'})
     col1, col2 = st.columns(2)
     with col1:
         st.plotly_chart(fig_cat, use_container_width=True)
     with col2:
-        st.dataframe(cat_counts.pivot(index='main_category', columns='brand_clean', values='count').fillna(0), use_container_width=True)
+        st.dataframe(cat_counts.pivot(index='category_clean', columns='brand_clean', values='count').fillna(0), use_container_width=True)
 
     # Product Count by Specific Category
     st.subheader("Product Count by Specific Category (Top 10)")
@@ -1018,23 +1018,23 @@ def brand_comparison_tab(df):
 
     # ASP Comparison
     st.subheader("Average Selling Price (ASP) by Main Category")
-    asp = comp_df.groupby(['main_category', 'brand_clean'])['final_price'].mean().reset_index()
-    fig_asp = px.bar(asp, x='main_category', y='final_price', color='brand_clean', barmode='group', labels={'final_price': 'ASP (€)', 'main_category': 'Main Category', 'brand_clean': 'Brand'})
+    asp = comp_df.groupby(['category_clean', 'brand_clean'])['final_price'].mean().reset_index()
+    fig_asp = px.bar(asp, x='category_clean', y='final_price', color='brand_clean', barmode='group', labels={'final_price': 'ASP (€)', 'category_clean': 'Main Category', 'brand_clean': 'Brand'})
     col1, col2 = st.columns(2)
     with col1:
         st.plotly_chart(fig_asp, use_container_width=True)
     with col2:
-        st.dataframe(asp.pivot(index='main_category', columns='brand_clean', values='final_price').round(2).fillna(0), use_container_width=True)
+        st.dataframe(asp.pivot(index='category_clean', columns='brand_clean', values='final_price').round(2).fillna(0), use_container_width=True)
 
     # Discount Comparison
     st.subheader("Average Discount (%) by Main Category")
-    disc = comp_df.groupby(['main_category', 'brand_clean'])['discount_pct'].mean().reset_index()
-    fig_disc = px.bar(disc, x='main_category', y='discount_pct', color='brand_clean', barmode='group', labels={'discount_pct': 'Avg Discount (%)', 'main_category': 'Main Category', 'brand_clean': 'Brand'})
+    disc = comp_df.groupby(['category_clean', 'brand_clean'])['discount_pct'].mean().reset_index()
+    fig_disc = px.bar(disc, x='category_clean', y='discount_pct', color='brand_clean', barmode='group', labels={'discount_pct': 'Avg Discount (%)', 'category_clean': 'Main Category', 'brand_clean': 'Brand'})
     col1, col2 = st.columns(2)
     with col1:
         st.plotly_chart(fig_disc, use_container_width=True)
     with col2:
-        st.dataframe(disc.pivot(index='main_category', columns='brand_clean', values='discount_pct').round(2).fillna(0), use_container_width=True)
+        st.dataframe(disc.pivot(index='category_clean', columns='brand_clean', values='discount_pct').round(2).fillna(0), use_container_width=True)
 
     # Size Curve
     st.subheader("Size Curve (Available Sizes Count)")

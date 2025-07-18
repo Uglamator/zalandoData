@@ -4,7 +4,8 @@ from app import auto_clean_data
 # Define the columns that are essential for the dashboard
 ESSENTIAL_COLUMNS = [
     'product_name', 'brand', 'initial_price', 'final_price', 'in_stock', 
-    'main_image', 'color', 'sizes', 'discovery_input', 'name', 'product_url'
+    'main_image', 'color', 'sizes', 'discovery_input', 'name', 'product_url',
+    'category_clean', 'specific_category'
 ]
 
 # Load only the essential columns from the correct raw data file
