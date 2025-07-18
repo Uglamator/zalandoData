@@ -1,3 +1,6 @@
 pandas
 beautifulsoup4
+cloudscraper
+requests
 selenium
+streamlit
