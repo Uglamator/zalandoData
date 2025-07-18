@@ -5,6 +5,8 @@ import numpy as np
 import plotly.express as px
 import re
 import json
+import requests
+import io
 
 # =====================
 # Data Cleaning Helpers
@@ -375,12 +377,29 @@ def ensure_cleaned_data():
     #cleaned_df = auto_clean_data(raw_df)
     #cleaned_df.to_csv(CLEANED_CSV, index=False)
 
-@st.cache_data
+
+@st.cache_data # Cache the entire process: download, clean, and return DataFrame
 def load_data():
-    ensure_cleaned_data()
-    df = pd.read_csv(CLEANED_CSV)
-    df = auto_clean_data(df)
-    return df
+    """
+    Downloads the raw data from GitHub, cleans it, and returns a DataFrame.
+    The result is cached to prevent re-downloading on every interaction.
+    """
+    try:
+        # Use requests to reliably fetch the data, handling redirects
+        response = requests.get(RAW_CSV)
+        response.raise_for_status()  # Raise an exception for bad responses (4xx or 5xx)
+
+        # Read the raw CSV content into a DataFrame
+        raw_df = pd.read_csv(io.StringIO(response.text))
+
+        # Perform all cleaning operations on the raw data
+        cleaned_df = auto_clean_data(raw_df)
+        
+        return cleaned_df
+
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to download data: {e}")
+        return pd.DataFrame() # Return an empty DataFrame on error
 
 def highlight_dorina(row):
     brand = row['brand_clean'] if 'brand_clean' in row else ''
