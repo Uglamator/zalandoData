@@ -14,23 +14,54 @@ import io
 # Explicit mapping for main and specific categories
 MAIN_CATEGORY_MAP = {
     # Bras
-    'bh': 'Bras', 'bra': 'Bras', 'buegel': 'Bras', 'underwired-bra': 'Bras', 'triangle-bra': 'Bras', 'soft-bra': 'Bras', 'push-up-bra': 'Bras', 't-shirt-bra': 'Bras', 'balcony-bra': 'Bras', 'strapless-bra': 'Bras',
+    'bh': 'Bras', 'bra': 'Bras', 'buegel': 'Bras', 'underwired': 'Bras', 'triangle': 'Bras', 'soft': 'Bras',
+    'push': 'Bras', 't-shirt': 'Bras', 'balcony': 'Bras', 'balconette': 'Bras',
+    'strapless': 'Bras', 'plunge': 'Bras', 'wireless': 'Bras', 'bralette': 'Bras', 'minimizer': 'Bras',
+    'maternity': 'Bras', 'multiway': 'Bras',
+
     # Underwear
-    'briefs': 'Underwear', 'panties': 'Underwear', 'period-panties': 'Underwear', 'g-strings': 'Underwear', 'slip': 'Underwear',
+    'briefs': 'Underwear', 'brief': 'Underwear', 'panties': 'Underwear', 'panty': 'Underwear',
+    'period-panties': 'Underwear', 'g-string': 'Underwear', 'slip': 'Underwear', 'thong': 'Underwear',
+    'tanga': 'Underwear', 'hipster': 'Underwear', 'brazilian': 'Underwear', 'string': 'Underwear',
+    'boxer': 'Underwear', 'shorts': 'Underwear', 'boyshort': 'Underwear',
+
+    # Bodysuits & Corsetry
+    'body': 'Bodysuits & Corsetry', 'bodysuit': 'Bodysuits & Corsetry', 'bodies': 'Bodysuits & Corsetry',
+    'bustier': 'Bodysuits & Corsetry', 'corset': 'Bodysuits & Corsetry',
+
     # Shapewear
-    'shapewear': 'Shapewear', 'body': 'Shapewear', 'bustier': 'Shapewear', 'corset': 'Shapewear',
+    'shapewear': 'Shapewear', 'girdle': 'Shapewear',
+
+    # Lingerie Sets
+    'lingerie-set': 'Lingerie Sets', 'set': 'Lingerie Sets',
+
+    # Nightwear
+    'pyjama': 'Nightwear', 'pajama': 'Nightwear', 'nightdress': 'Nightwear', 'nightwear': 'Nightwear',
+    'babydoll': 'Nightwear', 'chemise': 'Nightwear', 'robe': 'Nightwear',
+
+    # Tops
+    'tank': 'Tops', 'top': 'Tops', 'sweater': 'Tops', 'undershirt': 'Tops', 'camisole': 'Tops',
+
+    # Hosiery
+    'tights': 'Hosiery', 'stockings': 'Hosiery', 'hold-ups': 'Hosiery', 'socks': 'Hosiery', 'leggings': 'Hosiery',
+
+    # Swimwear
+    'bikini': 'Swimwear', 'swimsuit': 'Swimwear', 'tankini': 'Swimwear',
+
     # Sports
     'sports-bra': 'Sports Bras',
-    # Tops
-    'tank': 'Tops', 'top': 'Tops', 'sweater': 'Tops', 'undershirts': 'Tops',
-    # Bodies
-    'bodies': 'Bodies',
-    # Suspenders
-    'suspenders': 'Suspenders',
-    # Jeans/Bottoms
+
+    # Accessories
+    'suspenders': 'Accessories', 'garter': 'Accessories', 'pasties': 'Accessories',
+
+    # Bottoms (likely from other data)
     'jean': 'Bottoms',
-    # Fallbacks
-    'womens-clothing-lingerie-bodies': 'Bodies', 'women-clothing-underwear-undershirts': 'Tops', 'women-clothing-underwear-suspenders': 'Suspenders', 'women-clothing-underwear-corset': 'Shapewear',
+
+    # Fallbacks - updated for consistency
+    'womens-clothing-lingerie-bodies': 'Bodysuits & Corsetry',
+    'women-clothing-underwear-undershirts': 'Tops',
+    'women-clothing-underwear-suspenders': 'Accessories',
+    'women-clothing-underwear-corset': 'Bodysuits & Corsetry',
 }
 # You can expand this as needed for your business logic
 SPECIFIC_CATEGORY_MAP = {
