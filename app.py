@@ -884,7 +884,7 @@ def category_deep_dives(df):
     selected_brand = st.selectbox("Brand to Compare", ['All'] + brands, index=dorina_idx+1 if 'Dorina' in brands else 0, key='cat_brand_compare')
     if selected_brand != 'All':
         filtered = cat_df[cat_df['brand_clean'] == selected_brand]
-    else:
+        else:
         filtered = cat_df.copy()
     # --- KPI Tiles ---
     total_skus = len(filtered)
@@ -977,7 +977,7 @@ def deep_dive_by_specific_category(df):
     selected_brand = st.selectbox("Brand to Compare", ['All'] + brands, index=dorina_idx+1 if 'Dorina' in brands else 0, key='subcat_brand_compare')
     if selected_brand != 'All':
         filtered = subcat_df[subcat_df['brand_clean'] == selected_brand]
-    else:
+        else:
         filtered = subcat_df.copy()
     # --- KPI Tiles ---
     total_skus = len(filtered)
@@ -1087,7 +1087,7 @@ def download_data(df):
     dorina_df = df[df['brand_clean'].str.contains('Dorina', case=False, na=False)]
     st.markdown("---")
     st.header("Download Data Slices")
-    st.download_button(
+        st.download_button(
         label="Download Dorina Data as CSV",
         data=dorina_df.to_csv(index=False),
         file_name="dorina_products.csv",
@@ -1374,7 +1374,7 @@ def brand_performance_tab(df):
     col3.metric("Avg Discount", f"{brand_df['discount_pct'].mean():.2f}%")
     col4.metric("# Categories", f"{brand_df['category_clean'].nunique()}")
     # Export brand-specific filtered dataset
-    st.download_button(
+            st.download_button(
         label="Download Brand Performance dataset (CSV)",
         data=brand_df.to_csv(index=False),
         file_name="brand_performance_filtered.csv",
