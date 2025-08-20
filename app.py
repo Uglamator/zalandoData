@@ -1428,10 +1428,10 @@ def main():
         border-radius: 0.5rem;
         border-left: 4px solid #1f77b4;
     }
-    .stTabs [data-baseweb="tab-list"] {
+    .stTabs [data-baseweb=\"tab-list\"] {
         gap: 2rem;
     }
-    .stTabs [data-baseweb="tab"] {
+    .stTabs [data-baseweb=\"tab\"] {
         height: 4rem;
         white-space: pre-wrap;
         background-color: #f0f2f6;
@@ -1440,7 +1440,7 @@ def main():
         padding-top: 10px;
         padding-bottom: 10px;
     }
-    .stTabs [aria-selected="true"] {
+    .stTabs [aria-selected=\"true\"] {
         background-color: #1f77b4;
         color: white;
     }
@@ -1464,7 +1464,7 @@ def main():
     # Ensure derived columns exist and are consistent
     if not df.empty:
         df = auto_clean_data(df)
-
+        df = ensure_global_derivations(df)
     # ---- Global Filters (Sidebar) ----
     with st.sidebar:
         st.markdown("---")
@@ -1503,6 +1503,7 @@ def main():
     # --- Tab order and names ---
     tab_labels = [
         "🏠 Dashboard",
+        "🧭 Opportunities",
         "📊 Brand Performance",
         "🤝 Brand Comparison",
         "📈 Zalando Performance",
@@ -1512,12 +1513,14 @@ def main():
     with tabs[0]:
         dashboard_tab(df_filtered)
     with tabs[1]:
-        brand_performance_tab(df_filtered)
+        opportunities_tab(df_filtered)
     with tabs[2]:
-        brand_comparison_tab(df_filtered)
+        brand_performance_tab(df_filtered)
     with tabs[3]:
-        zalando_performance_tab(df_filtered)
+        brand_comparison_tab(df_filtered)
     with tabs[4]:
+        zalando_performance_tab(df_filtered)
+    with tabs[5]:
         virtual_shopping_room(df_filtered)
 
 if __name__ == "__main__":
