@@ -565,89 +565,78 @@ def opportunities_tab(df):
     st.header("Opportunities")
     st.markdown("---")
 
-    # Determine brand of interest
-    brand_of_interest = st.session_state.get('global_brand', 'Dorina')
-    if 'brand_clean' in df.columns:
-        if brand_of_interest == 'All' or brand_of_interest not in set(df['brand_clean']):
-            brand_of_interest = 'Dorina' if 'Dorina' in set(df['brand_clean']) else (
-                df['brand_clean'].value_counts().index[0] if not df.empty else 'Unknown'
-            )
+    # Brand selector
+    brands = sorted(df['brand_clean'].dropna().unique()) if 'brand_clean' in df.columns else []
+    default_brand = st.session_state.get('global_brand') if st.session_state.get('global_brand') in brands else ('Dorina' if 'Dorina' in brands else (brands[0] if brands else None))
+    brand_of_interest = st.selectbox("Brand", brands, index=(brands.index(default_brand) if default_brand in brands else 0)) if brands else None
 
     # Ensure derived columns
     with st.spinner("Preparing opportunity signals..."):
         df = ensure_global_derivations(df)
 
-    # --- Opportunity Queues ---
-    st.subheader("Opportunity Queues")
-    col1, col2, col3 = st.columns(3)
+    df_brand = df[df['brand_clean'] == brand_of_interest] if brand_of_interest else df.copy()
 
-    with col1:
-        st.markdown("**High demand (low stock, no discount)**")
-        mask_high = df['is_high_demand'] if 'is_high_demand' in df.columns else pd.Series(False, index=df.index)
-        high_demand = df[mask_high].copy()
-        if not high_demand.empty:
-            high_demand = high_demand.sort_values('in_stock_pct').head(15)
-            st.dataframe(
-                high_demand[[
-                    'best_name', 'brand_clean', 'specific_category',
-                    'in_stock', 'total', 'in_stock_pct', 'final_price'
-                ]].reset_index(drop=True),
-                use_container_width=True,
-            )
-            st.download_button(
-                "Download high-demand CSV",
-                data=high_demand.to_csv(index=False),
-                file_name="high_demand.csv",
-            )
-        else:
-            st.info("No high-demand items in the current view.")
-
-    with col2:
-        st.markdown("**Clearance candidates (≥50% discount)**")
-        mask_clear = df['is_clearance_candidate'] if 'is_clearance_candidate' in df.columns else pd.Series(False, index=df.index)
-        clearance = df[mask_clear].copy()
-        if not clearance.empty:
-            clearance = clearance.sort_values('discount_pct', ascending=False).head(15)
-            st.dataframe(
-                clearance[[
-                    'best_name', 'brand_clean', 'specific_category',
-                    'discount_pct', 'final_price', 'in_stock'
-                ]].reset_index(drop=True),
-                use_container_width=True,
-            )
-            st.download_button(
-                "Download clearance CSV",
-                data=clearance.to_csv(index=False),
-                file_name="clearance_candidates.csv",
-            )
-        else:
-            st.info("No clearance candidates in the current view.")
-
-    with col3:
-        st.markdown("**Price-band gaps (brand vs market)**")
-        gaps = market_vs_brand_band_gaps(
-            df,
-            brand_of_interest,
-            subcat_col='specific_category',
-            band_col='price_band_item',
-            min_gap=0.10,
-            min_skus=20,
+    # --- Opportunity Queues (stacked for clarity) ---
+    st.subheader("High demand (low stock, no discount)")
+    mask_high = df_brand['is_high_demand'] if 'is_high_demand' in df_brand.columns else pd.Series(False, index=df_brand.index)
+    high_demand = df_brand[mask_high].copy()
+    if not high_demand.empty:
+        high_demand = high_demand.sort_values('in_stock_pct').head(15)
+        st.dataframe(
+            high_demand[['best_name', 'specific_category', 'in_stock', 'total', 'in_stock_pct', 'final_price']].reset_index(drop=True),
+            use_container_width=True,
+            column_config={
+                'in_stock_pct': st.column_config.NumberColumn(format="%.1f%%")
+            }
         )
-        if not gaps.empty:
-            st.dataframe(gaps, use_container_width=True)
-            st.download_button(
-                "Download band gaps CSV",
-                data=gaps.to_csv(index=False),
-                file_name="band_gaps.csv",
-            )
-        else:
-            st.info("No significant band gaps found.")
+        st.download_button("Download high-demand CSV", data=high_demand.to_csv(index=False), file_name="high_demand.csv")
+    else:
+        st.info("No high-demand items for this brand.")
+
+    st.divider()
+
+    st.subheader("Clearance candidates (≥50% discount)")
+    mask_clear = df_brand['is_clearance_candidate'] if 'is_clearance_candidate' in df_brand.columns else pd.Series(False, index=df_brand.index)
+    clearance = df_brand[mask_clear].copy()
+    if not clearance.empty:
+        clearance = clearance.sort_values('discount_pct', ascending=False).head(15)
+        st.dataframe(
+            clearance[['best_name', 'specific_category', 'discount_pct', 'final_price', 'in_stock']].reset_index(drop=True),
+            use_container_width=True,
+            column_config={
+                'discount_pct': st.column_config.NumberColumn(format="%.1f%%")
+            }
+        )
+        st.download_button("Download clearance CSV", data=clearance.to_csv(index=False), file_name="clearance_candidates.csv")
+    else:
+        st.info("No clearance candidates for this brand.")
+
+    st.divider()
+
+    st.subheader("Price-band gaps (brand vs market)")
+    gaps = market_vs_brand_band_gaps(
+        df,  # compare against market
+        brand_of_interest,
+        subcat_col='specific_category',
+        band_col='price_band_item',
+        min_gap=0.10,
+        min_skus=20,
+    ) if brand_of_interest else pd.DataFrame()
+    if not gaps.empty:
+        st.dataframe(gaps, use_container_width=True, column_config={
+            'Market_Share': st.column_config.NumberColumn(format="%.1f%%"),
+            'Brand_Share': st.column_config.NumberColumn(format="%.1f%%"),
+            'Gap': st.column_config.NumberColumn(format="%.1f%%"),
+        })
+        st.download_button("Download band gaps CSV", data=gaps.to_csv(index=False), file_name="band_gaps.csv")
+    else:
+        st.info("No significant band gaps for this brand.")
 
     st.markdown("---")
 
     # --- Benchmarks ---
     st.subheader(f"Benchmarks vs Market ({brand_of_interest})")
-    if not df.empty and 'specific_category' in df.columns:
+    if brand_of_interest and not df.empty and 'specific_category' in df.columns:
         bench = df.groupby('specific_category').agg(
             market_asp=('final_price', 'mean'),
             market_discount=('discount_pct', 'mean'),
@@ -662,18 +651,18 @@ def opportunities_tab(df):
         st.dataframe(
             smart_style(bench_merged.sort_values('asp_delta', ascending=False)),
             use_container_width=True,
+            column_config={
+                'market_discount': st.column_config.NumberColumn(format="%.1f%%"),
+                'brand_discount': st.column_config.NumberColumn(format="%.1f%%"),
+                'discount_delta': st.column_config.NumberColumn(format="%.1f%%"),
+            }
         )
-        st.download_button(
-            "Download benchmarks CSV",
-            data=bench_merged.to_csv(index=False),
-            file_name="benchmarks_vs_market.csv",
-        )
+        st.download_button("Download benchmarks CSV", data=bench_merged.to_csv(index=False), file_name="benchmarks_vs_market.csv")
 
     st.markdown("---")
 
     # --- Size Intelligence ---
     st.subheader("Size Intelligence")
-
     def get_size_counts_simple(sub_df):
         size_counter = {}
         if 'sizes' not in sub_df.columns:
@@ -702,195 +691,78 @@ def opportunities_tab(df):
             except Exception:
                 continue
         return pd.Series(size_counter)
-
     market_sizes = get_size_counts_simple(df)
-    brand_sizes = get_size_counts_simple(
-        df[df['brand_clean'] == brand_of_interest] if 'brand_clean' in df.columns else df
-    )
+    brand_sizes = get_size_counts_simple(df_brand)
     size_cov = pd.DataFrame({'Market': market_sizes, brand_of_interest: brand_sizes}).fillna(0).astype(int).sort_index()
     st.dataframe(size_cov, use_container_width=True)
-    st.plotly_chart(
-        px.bar(size_cov, barmode='group', labels={'value': 'Count', 'index': 'Size'}),
-        use_container_width=True,
-    )
+    st.plotly_chart(px.bar(size_cov, barmode='group', labels={'value': 'Count', 'index': 'Size'}), use_container_width=True)
 
     st.markdown("---")
 
     # --- Pack Analytics ---
     st.subheader("Pack Analytics")
-    packs_df = df.copy()
+    pack_scope = st.selectbox("Scope", [f"{brand_of_interest} only", "All brands"], index=0 if brand_of_interest else 1)
+    packs_df = df_brand.copy() if pack_scope.startswith(str(brand_of_interest)) else df.copy()
     if 'pack_size' in packs_df.columns:
         packs_df['is_pack'] = packs_df['pack_size'] > 1
         mix = packs_df['is_pack'].value_counts(normalize=True).rename(index={True: 'Pack', False: 'Single'})
         if not mix.empty:
-            st.plotly_chart(
-                px.pie(names=mix.index, values=mix.values, title='Pack vs Single Mix'),
-                use_container_width=True,
-            )
+            st.plotly_chart(px.pie(names=mix.index, values=mix.values, title='Pack vs Single Mix'), use_container_width=True)
+        # Singles vs Packs table (sorted by index desc)
+        packs_table = packs_df[['best_name', 'brand_clean', 'specific_category', 'pack_size', 'final_price', 'price_per_item', 'is_pack']].copy()
+        st.dataframe(packs_table.sort_index(ascending=False), use_container_width=True)
     if {'price_per_item', 'specific_category'}.issubset(packs_df.columns):
         subcat_median = packs_df.groupby('specific_category')['price_per_item'].median().rename('subcat_item_median')
         packs_df = packs_df.merge(subcat_median, on='specific_category', how='left')
-        packs_df['per_item_premium_pct'] = (
-            (packs_df['price_per_item'] - packs_df['subcat_item_median']) / packs_df['subcat_item_median'] * 100
-        ).round(1)
+        packs_df['per_item_premium_pct'] = ((packs_df['price_per_item'] - packs_df['subcat_item_median']) / packs_df['subcat_item_median'] * 100).round(1)
         premium = packs_df[packs_df['per_item_premium_pct'] > 20].sort_values('per_item_premium_pct', ascending=False).head(20)
         if not premium.empty:
             st.dataframe(
-                smart_style(
-                    premium[[
-                        'best_name', 'brand_clean', 'specific_category', 'pack_size',
-                        'price_per_item', 'subcat_item_median', 'per_item_premium_pct'
-                    ]]
-                ),
+                premium[['best_name', 'brand_clean', 'specific_category', 'pack_size', 'price_per_item', 'subcat_item_median', 'per_item_premium_pct']],
                 use_container_width=True,
+                column_config={'per_item_premium_pct': st.column_config.NumberColumn(format="%.1f%%")}
             )
-            st.download_button(
-                "Download pack premium CSV",
-                data=premium.to_csv(index=False),
-                file_name="pack_per_item_premium.csv",
-            )
+            st.download_button("Download pack premium CSV", data=premium.to_csv(index=False), file_name="pack_per_item_premium.csv")
 
-# =====================
-# Dashboard Sections
-# =====================
-# (Implement all dashboard section functions here, similar to virtual_shopping_room)
+    st.markdown("---")
 
-def dashboard_tab(df):
-    st.header("Dashboard")
-    st.markdown("---")
-    # --- Category/Subcategory Filters ---
-    categories = ['All'] + sorted(df['category_clean'].dropna().unique())
-    selected_category = st.selectbox("Filter by Category", categories, index=0, key='dashboard_category')
-    if selected_category != 'All':
-        subcategories = ['All'] + sorted(df[df['category_clean'] == selected_category]['specific_category'].dropna().unique())
-    else:
-        subcategories = ['All'] + sorted(df['specific_category'].dropna().unique())
-    selected_subcat = st.selectbox("Filter by Subcategory", subcategories, index=0, key='dashboard_subcat')
-    filtered = df.copy()
-    if selected_category != 'All':
-        filtered = filtered[filtered['category_clean'] == selected_category]
-    if selected_subcat != 'All':
-        filtered = filtered[filtered['specific_category'] == selected_subcat]
-    # --- Top Row: KPI Tiles ---
-    total_skus = len(filtered)
-    in_stock = (filtered['in_stock'] > 0).sum() if 'in_stock' in filtered.columns else 0
-    pct_in_stock = (in_stock / total_skus * 100) if total_skus > 0 else 0
-    discounted = (filtered['discount_pct'] > 0).sum()
-    pct_discounted = (discounted / total_skus * 100) if total_skus > 0 else 0
-    avg_discount = filtered.loc[filtered['discount_pct'] > 0, 'discount_pct'].mean() if discounted > 0 else 0
-    avg_price_pack = filtered['final_price'].mean()
-    avg_price_item = filtered['price_per_item'].mean()
-    n_brands = filtered['brand_clean'].nunique()
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
-    col1.metric("Total SKUs", f"{total_skus:,}")
-    col2.metric("% In Stock", f"{pct_in_stock:.1f}%")
-    col3.metric("% Discounted", f"{pct_discounted:.1f}%")
-    col4.metric("Avg Discount", f"{avg_discount:.1f}%")
-    col5.metric("Avg Price (Pack)", f"€{avg_price_pack:.2f}")
-    col6.metric("Avg Price (Item)", f"€{avg_price_item:.2f}")
-    st.markdown("---")
-    # --- Second Row: Visual Mixes ---
-    colA, colB = st.columns(2)
-    with colA:
-        st.markdown("**Price Band Mix (Per Item)**")
-        price_band_item = pd.cut(filtered['price_per_item'], bins=PRICE_BINS, labels=PRICE_LABELS, right=False)
-        price_counts_item = price_band_item.value_counts().reindex(PRICE_LABELS, fill_value=0)
-        st.plotly_chart(px.bar(x=PRICE_LABELS, y=price_counts_item.values, labels={'x': 'Price Band (Per Item)', 'y': 'SKUs'}), use_container_width=True)
-    with colB:
-        st.markdown("**Color Mix**")
-        if 'color_clean' in filtered.columns:
-            color_counts = filtered['color_clean'].value_counts()
-            sorted_colors = color_counts.sort_values(ascending=False)
-            total_colors = sorted_colors.sum()
-            cumsum = sorted_colors.cumsum() / total_colors
-            main_colors = sorted_colors[cumsum <= 0.5]
-            other_colors = sorted_colors[cumsum > 0.5]
-            pie_labels = list(main_colors.index)
-            pie_values = list(main_colors.values)
-            if not other_colors.empty:
-                pie_labels.append('Other')
-                pie_values.append(other_colors.sum())
-            st.plotly_chart(px.pie(names=pie_labels, values=pie_values, title=None), use_container_width=True)
-    st.markdown("---")
-    # --- Third Row: Actionable Tables ---
-    with st.expander("Top Discounted Products", expanded=False):
-        top_discounted = filtered[filtered['discount_pct'] > 0].sort_values('discount_pct', ascending=False).head(10)
-        for i, row in top_discounted.iterrows():
-            cols = st.columns([1, 3])
-            with cols[0]:
-                img_url = row.get('main_image')
-                if img_url and pd.notna(img_url) and str(img_url).startswith('http'):
-                    st.image(img_url, width=80)
-                else:
-                    st.write("No image")
-            with cols[1]:
-                st.markdown(f"**{row['best_name']}**")
-                st.write(f"€{row['final_price']:.2f}")
-                st.write(f"Discount: {row['discount_pct']:.1f}%")
-                st.write(f"Brand: {row['brand_clean']}")
-                if 'in_stock' in row:
-                    st.write(f"In stock: {row['in_stock']}")
-        # Export button for current filtered view
-        st.download_button(
-            label="Download filtered dataset (CSV)",
-            data=filtered.to_csv(index=False),
-            file_name="dashboard_filtered.csv",
-            mime="text/csv"
+    # --- Pricing Opportunities ---
+    st.subheader("Pricing Opportunities")
+    # Choose subcategory focus
+    subcats_brand = df_brand['specific_category'].value_counts().index.tolist() if 'specific_category' in df_brand.columns else []
+    selected_subcat = st.selectbox("Subcategory", subcats_brand if subcats_brand else (df['specific_category'].value_counts().index.tolist() if 'specific_category' in df.columns else []))
+    sub_df = df[df['specific_category'] == selected_subcat] if selected_subcat else df.copy()
+    # Default competitors: top by SKU excluding selected brand
+    comp_pool = sub_df[sub_df['brand_clean'] != brand_of_interest]['brand_clean'].value_counts().index.tolist()
+    default_comps = comp_pool[:5]
+    selected_comps = st.multiselect("Competitors (up to 5)", comp_pool, default=default_comps, max_selections=5)
+    compare_brands = [brand_of_interest] + selected_comps if brand_of_interest else selected_comps
+    comp_df = sub_df[sub_df['brand_clean'].isin(compare_brands)].copy()
+    if not comp_df.empty:
+        # Summary table
+        summary = comp_df.groupby('brand_clean').agg(
+            median_pack_price=('final_price', 'median'),
+            median_item_price=('price_per_item', 'median'),
+            avg_discount=('discount_pct', 'mean')
+        ).reindex(compare_brands)
+        st.dataframe(
+            smart_style(summary.reset_index().rename(columns={'brand_clean': 'Brand'})),
+            use_container_width=True,
+            column_config={'avg_discount': st.column_config.NumberColumn(format="%.1f%%")}
         )
-    st.subheader("Most Out-of-Stock Products")
-    if 'in_stock' in filtered.columns and 'total' in filtered.columns:
-        filtered['in_stock_pct'] = (filtered['in_stock'] / filtered['total'] * 100).round(1)
-        low_instock = filtered[filtered['in_stock_pct'] < 60].sort_values('in_stock_pct').head(10)
-        for i, row in low_instock.iterrows():
-            cols = st.columns([1, 3])
-            with cols[0]:
-                img_url = row.get('main_image')
-                if img_url and pd.notna(img_url) and str(img_url).startswith('http'):
-                    st.image(img_url, width=80)
-                else:
-                    st.write("No image")
-            with cols[1]:
-                st.markdown(f"**{row['best_name']}**")
-                st.write(f"€{row['final_price']:.2f}")
-                st.write(f"Brand: {row['brand_clean']}")
-                st.write(f"In-stock: {row['in_stock']} / {row['total']} sizes ({row['in_stock_pct']}%)")
-    st.markdown("---")
-    # --- Deep Dive Tabs ---
-    st.subheader("Deep Dives")
-    deepdive_tabs = st.tabs(["Category Deep Dive", "Subcategory Deep Dive"])
-    with deepdive_tabs[0]:
-        st.info("Select a main category below to see brand, color, and price analytics for that category.")
-        category_deep_dives(filtered)
-    with deepdive_tabs[1]:
-        st.info("Select a subcategory below to see brand, color, and price analytics for that subcategory.")
-        deep_dive_by_specific_category(filtered)
-
-    # --- Pack Analysis Section ---
-    st.markdown("---")
-    st.header("Pack Analysis")
-
-    # Filter for products sold in packs
-    packs_df = filtered[filtered['pack_size'] > 1].copy()
-
-    if not packs_df.empty:
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown("**Distribution of Pack Sizes**")
-            pack_counts = packs_df['pack_size'].value_counts().sort_index()
-            st.plotly_chart(px.bar(pack_counts, 
-                                   x=pack_counts.index, 
-                                   y=pack_counts.values, 
-                                   labels={'x': 'Pack Size', 'y': 'Number of SKUs'}),
-                            use_container_width=True)
-
-        with col2:
-            st.markdown("**Top 10 Brands Selling in Packs**")
-            brand_pack_counts = packs_df['brand_clean'].value_counts().head(10)
-            st.dataframe(brand_pack_counts.reset_index().rename(columns={'index': 'Brand', 'brand_clean': 'SKU Count'}),
-                         use_container_width=True)
+        # Band share chart within subcategory
+        if 'price_band_item' in comp_df.columns:
+            band_share = comp_df.groupby(['brand_clean', 'price_band_item']).size().groupby(level=0).apply(lambda s: s / s.sum()).reset_index(name='share')
+            band_share = band_share[band_share['brand_clean'].isin(compare_brands)]
+            fig = px.bar(
+                band_share,
+                x='price_band_item', y='share', color='brand_clean', barmode='group',
+                category_orders={'price_band_item': PRICE_LABELS},
+                labels={'price_band_item': 'Price Band (Item)', 'share': 'Share', 'brand_clean': 'Brand'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No products sold in packs match the current filter criteria.")
+        st.info("No competitor data available for this subcategory.")
 
 def virtual_shopping_room(df):
     """
@@ -1657,6 +1529,148 @@ def show_user_guide():
     - Click the help button (❓) in the sidebar to view this guide again.
     - Hover over charts and tables for more details.
     """)
+
+# =====================
+# Dashboard Sections
+# =====================
+# (Implement all dashboard section functions here, similar to virtual_shopping_room)
+
+def dashboard_tab(df):
+    st.header("Dashboard")
+    st.markdown("---")
+    # --- Category/Subcategory Filters ---
+    categories = ['All'] + sorted(df['category_clean'].dropna().unique())
+    selected_category = st.selectbox("Filter by Category", categories, index=0, key='dashboard_category')
+    if selected_category != 'All':
+        subcategories = ['All'] + sorted(df[df['category_clean'] == selected_category]['specific_category'].dropna().unique())
+    else:
+        subcategories = ['All'] + sorted(df['specific_category'].dropna().unique())
+    selected_subcat = st.selectbox("Filter by Subcategory", subcategories, index=0, key='dashboard_subcat')
+    filtered = df.copy()
+    if selected_category != 'All':
+        filtered = filtered[filtered['category_clean'] == selected_category]
+    if selected_subcat != 'All':
+        filtered = filtered[filtered['specific_category'] == selected_subcat]
+    # --- Top Row: KPI Tiles ---
+    total_skus = len(filtered)
+    in_stock = (filtered['in_stock'] > 0).sum() if 'in_stock' in filtered.columns else 0
+    pct_in_stock = (in_stock / total_skus * 100) if total_skus > 0 else 0
+    discounted = (filtered['discount_pct'] > 0).sum()
+    pct_discounted = (discounted / total_skus * 100) if total_skus > 0 else 0
+    avg_discount = filtered.loc[filtered['discount_pct'] > 0, 'discount_pct'].mean() if discounted > 0 else 0
+    avg_price_pack = filtered['final_price'].mean()
+    avg_price_item = filtered['price_per_item'].mean()
+    n_brands = filtered['brand_clean'].nunique()
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1.metric("Total SKUs", f"{total_skus:,}")
+    col2.metric("% In Stock", f"{pct_in_stock:.1f}%")
+    col3.metric("% Discounted", f"{pct_discounted:.1f}%")
+    col4.metric("Avg Discount", f"{avg_discount:.1f}%")
+    col5.metric("Avg Price (Pack)", f"€{avg_price_pack:.2f}")
+    col6.metric("Avg Price (Item)", f"€{avg_price_item:.2f}")
+    st.markdown("---")
+    # --- Second Row: Visual Mixes ---
+    colA, colB = st.columns(2)
+    with colA:
+        st.markdown("**Price Band Mix (Per Item)**")
+        price_band_item = pd.cut(filtered['price_per_item'], bins=PRICE_BINS, labels=PRICE_LABELS, right=False)
+        price_counts_item = price_band_item.value_counts().reindex(PRICE_LABELS, fill_value=0)
+        st.plotly_chart(px.bar(x=PRICE_LABELS, y=price_counts_item.values, labels={'x': 'Price Band (Per Item)', 'y': 'SKUs'}), use_container_width=True)
+    with colB:
+        st.markdown("**Color Mix**")
+        if 'color_clean' in filtered.columns:
+            color_counts = filtered['color_clean'].value_counts()
+            sorted_colors = color_counts.sort_values(ascending=False)
+            total_colors = sorted_colors.sum()
+            cumsum = sorted_colors.cumsum() / total_colors
+            main_colors = sorted_colors[cumsum <= 0.5]
+            other_colors = sorted_colors[cumsum > 0.5]
+            pie_labels = list(main_colors.index)
+            pie_values = list(main_colors.values)
+            if not other_colors.empty:
+                pie_labels.append('Other')
+                pie_values.append(other_colors.sum())
+            st.plotly_chart(px.pie(names=pie_labels, values=pie_values, title=None), use_container_width=True)
+    st.markdown("---")
+    # --- Third Row: Actionable Tables ---
+    with st.expander("Top Discounted Products", expanded=False):
+        top_discounted = filtered[filtered['discount_pct'] > 0].sort_values('discount_pct', ascending=False).head(10)
+        for i, row in top_discounted.iterrows():
+            cols = st.columns([1, 3])
+            with cols[0]:
+                img_url = row.get('main_image')
+                if img_url and pd.notna(img_url) and str(img_url).startswith('http'):
+                    st.image(img_url, width=80)
+                else:
+                    st.write("No image")
+            with cols[1]:
+                st.markdown(f"**{row['best_name']}**")
+                st.write(f"€{row['final_price']:.2f}")
+                st.write(f"Discount: {row['discount_pct']:.1f}%")
+                st.write(f"Brand: {row['brand_clean']}")
+                if 'in_stock' in row:
+                    st.write(f"In stock: {row['in_stock']}")
+        # Export button for current filtered view
+        st.download_button(
+            label="Download filtered dataset (CSV)",
+            data=filtered.to_csv(index=False),
+            file_name="dashboard_filtered.csv",
+            mime="text/csv"
+        )
+    st.subheader("Most Out-of-Stock Products")
+    if 'in_stock' in filtered.columns and 'total' in filtered.columns:
+        filtered['in_stock_pct'] = (filtered['in_stock'] / filtered['total'] * 100).round(1)
+        low_instock = filtered[filtered['in_stock_pct'] < 60].sort_values('in_stock_pct').head(10)
+        for i, row in low_instock.iterrows():
+            cols = st.columns([1, 3])
+            with cols[0]:
+                img_url = row.get('main_image')
+                if img_url and pd.notna(img_url) and str(img_url).startswith('http'):
+                    st.image(img_url, width=80)
+                else:
+                    st.write("No image")
+            with cols[1]:
+                st.markdown(f"**{row['best_name']}**")
+                st.write(f"€{row['final_price']:.2f}")
+                st.write(f"Brand: {row['brand_clean']}")
+                st.write(f"In-stock: {row['in_stock']} / {row['total']} sizes ({row['in_stock_pct']}%)")
+    st.markdown("---")
+    # --- Deep Dive Tabs ---
+    st.subheader("Deep Dives")
+    deepdive_tabs = st.tabs(["Category Deep Dive", "Subcategory Deep Dive"])
+    with deepdive_tabs[0]:
+        st.info("Select a main category below to see brand, color, and price analytics for that category.")
+        category_deep_dives(filtered)
+    with deepdive_tabs[1]:
+        st.info("Select a subcategory below to see brand, color, and price analytics for that subcategory.")
+        deep_dive_by_specific_category(filtered)
+
+    # --- Pack Analysis Section ---
+    st.markdown("---")
+    st.header("Pack Analysis")
+
+    # Filter for products sold in packs
+    packs_df = filtered[filtered['pack_size'] > 1].copy()
+
+    if not packs_df.empty:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Distribution of Pack Sizes**")
+            pack_counts = packs_df['pack_size'].value_counts().sort_index()
+            st.plotly_chart(px.bar(pack_counts, 
+                                   x=pack_counts.index, 
+                                   y=pack_counts.values, 
+                                   labels={'x': 'Pack Size', 'y': 'Number of SKUs'}),
+                            use_container_width=True)
+
+        with col2:
+            st.markdown("**Top 10 Brands Selling in Packs**")
+            brand_pack_counts = packs_df['brand_clean'].value_counts().head(10)
+            st.dataframe(brand_pack_counts.reset_index().rename(columns={'index': 'Brand', 'brand_clean': 'SKU Count'}),
+                         use_container_width=True)
+    else:
+        st.info("No products sold in packs match the current filter criteria.")
 
 # --- Main App ---
 def main():
