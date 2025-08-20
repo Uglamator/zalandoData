@@ -521,12 +521,13 @@ def show_table(df: pd.DataFrame, height: int = 350, paginate: bool = True):
 def precompute_aggregates(df):
     agg = {}
     if {'brand_clean', 'specific_category', 'price_band_item'}.issubset(df.columns):
-        share = (
-            df.groupby(['brand_clean', 'specific_category', 'price_band_item']).size()
-              .groupby(level=[0, 1]).apply(lambda s: s / s.sum())
-              .rename('share').reset_index()
+        counts = (
+            df.groupby(['brand_clean', 'specific_category', 'price_band_item'])
+              .size()
+              .reset_index(name='count')
         )
-        agg['brand_subcat_band_share'] = share
+        counts['share'] = counts['count'] / counts.groupby(['brand_clean', 'specific_category'])['count'].transform('sum')
+        agg['brand_subcat_band_share'] = counts[['brand_clean', 'specific_category', 'price_band_item', 'share']]
     return agg
 
 def render_data_status(df):
