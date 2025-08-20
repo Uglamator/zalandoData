@@ -642,16 +642,23 @@ def opportunities_tab(df):
     # Global performance knobs
     col_knob1, col_knob2, col_knob3 = st.columns([1,1,2])
     with col_knob1:
-        row_cap = st.slider("Row cap", min_value=100, max_value=5000, value=500, step=100, help="Limit rows shown in tables to reduce memory use")
+        row_cap = st.slider("Row cap", min_value=50, max_value=5000, value=200, step=50, help="Limit rows shown in tables to reduce memory use")
     with col_knob2:
-        sample_cap = st.slider("Sample cap", min_value=1000, max_value=50000, value=10000, step=1000, help="Max rows used in heavy aggregations")
+        sample_cap = st.slider("Sample cap", min_value=1000, max_value=50000, value=5000, step=1000, help="Max rows used in heavy aggregations")
 
-    # Ensure derived columns and pre-aggregations
+    # Ensure derived columns (avoid heavy pre-aggregations by default)
     with st.spinner("Preparing opportunity signals..."):
         df = ensure_global_derivations(df)
-        aggs = precompute_aggregates(df)
 
     df_brand = df[df['brand_clean'] == brand_of_interest] if brand_of_interest else df
+
+    # Memory guardrails for heavy sections
+    heavy_rows = len(df)
+    allow_heavy_default = False
+    if heavy_rows > 50000:
+        st.warning(f"Large dataset detected ({heavy_rows:,} rows). Heavy computations are disabled by default.")
+        allow_heavy_default = False
+    allow_heavy = st.checkbox("Allow heavy computations (may use more memory)", value=allow_heavy_default)
 
     # --- Assortment & Size Coverage ---
     st.subheader("Assortment & Size Coverage")
@@ -672,9 +679,12 @@ def opportunities_tab(df):
         st.markdown("**Missing colors by subcategory**")
         if {'specific_category','color_clean'}.issubset(df.columns) and brand_of_interest:
             subcat_color = []
-            for subcat, sub_df in df.groupby('specific_category'):
-                market_colors = set(sub_df['color_clean'].dropna())
-                brand_colors = set(df_brand[df_brand['specific_category'] == subcat]['color_clean'].dropna())
+            # Limit grouping to avoid OOM
+            df_colors = df[['specific_category','color_clean']].dropna().head(sample_cap)
+            df_brand_colors = df_brand[['specific_category','color_clean']].dropna().head(sample_cap)
+            for subcat, sub_df in df_colors.groupby('specific_category'):
+                market_colors = set(sub_df['color_clean'])
+                brand_colors = set(df_brand_colors[df_brand_colors['specific_category'] == subcat]['color_clean'])
                 missing = list(market_colors - brand_colors)
                 if missing:
                     market_color_counts = sub_df['color_clean'].value_counts(normalize=True)
@@ -685,10 +695,10 @@ def opportunities_tab(df):
                 st.dataframe(color_gap_df.sort_values('est_share_lost', ascending=False).head(row_cap), use_container_width=True, column_config={'est_share_lost': st.column_config.NumberColumn(format="%.1f%%")})
             else:
                 st.caption("No color gaps detected.")
-        # Size heatmap with target
+        # Size heatmap with target (heavy)
         st.markdown("**Size coverage heatmap**")
-        compute_heatmap = st.checkbox("Compute size heatmap", value=False)
-        if compute_heatmap:
+        compute_heatmap = st.checkbox("Compute size heatmap", value=False, disabled=not allow_heavy)
+        if compute_heatmap and allow_heavy:
             def count_sizes(sub_df):
                 size_counter = {}
                 for sizes_json in sub_df['sizes'].dropna().head(sample_cap):
@@ -710,7 +720,12 @@ def opportunities_tab(df):
             if 'sizes' in df.columns:
                 market_mat = {}
                 brand_mat = {}
-                for subcat, sub_df in df.groupby('specific_category'):
+                # Limit number of subcategories processed when large
+                subcats_iter = list(df['specific_category'].dropna().unique())
+                if len(subcats_iter) > 100:
+                    subcats_iter = subcats_iter[:100]
+                for subcat in subcats_iter:
+                    sub_df = df[df['specific_category'] == subcat]
                     mcount = count_sizes(sub_df)
                     bcount = count_sizes(df_brand[df_brand['specific_category'] == subcat])
                     all_sizes = sorted(set(mcount.index).union(set(bcount.index)))
@@ -721,7 +736,6 @@ def opportunities_tab(df):
                 with np.errstate(divide='ignore', invalid='ignore'):
                     coverage_pct = (brand_df_sizes / market_df.replace(0, np.nan) * 100).clip(0, 100).fillna(0)
                 st.dataframe(coverage_pct.round(1), use_container_width=True, height=400)
-                # Shortfall table
                 shortfall = (size_target - coverage_pct).clip(lower=0).mean(axis=0).sort_values(ascending=False)
                 st.caption("Avg shortfall vs target by subcategory (%)")
                 st.dataframe(shortfall.to_frame('avg_shortfall_pct').round(1), use_container_width=True)
@@ -871,7 +885,7 @@ def opportunities_tab(df):
                 counts['share'] = counts['count'] / counts.groupby('brand_clean')['count'].transform('sum')
                 fig = px.bar(counts, x='price_band_item', y='share', color='brand_clean', barmode='group', category_orders={'price_band_item': PRICE_LABELS}, labels={'price_band_item': 'Price Band (Item)', 'share': 'Share', 'brand_clean': 'Brand'})
                 st.plotly_chart(fig, use_container_width=True)
-        else:
+    else:
             st.info("No competitor data available for this subcategory.")
 
 def virtual_shopping_room(df):
@@ -1914,6 +1928,19 @@ def main():
         df = ensure_global_derivations(df)
     # Data status banner
     render_data_status(df)
+
+    # Safe mode via query param ?safe=1
+    try:
+        qp = st.query_params
+    except Exception:
+        qp = st.experimental_get_query_params()
+    safe_vals = qp.get('safe', []) if isinstance(qp, dict) else []
+    if isinstance(safe_vals, str):
+        safe_vals = [safe_vals]
+    safe_mode = any(str(v).lower() in ('1','true','yes') for v in safe_vals)
+    if safe_mode:
+        st.info("Safe mode enabled: Heavy tabs/features are limited.")
+
     # ---- Global Filters (Sidebar) ----
     with st.sidebar:
         st.markdown("---")
@@ -1952,24 +1979,35 @@ def main():
     # --- Tab order and names ---
     tab_labels = [
         "🏠 Dashboard",
-        "🧭 Opportunities",
+        # Hide Opportunities tab in safe mode
+    ]
+    if not safe_mode:
+        tab_labels.append("🧭 Opportunities")
+    tab_labels += [
         "📊 Brand Performance",
         "🤝 Brand Comparison",
         "📈 Zalando Performance",
         "🛍️ Product Viewer"
     ]
     tabs = st.tabs(tab_labels)
-    with tabs[0]:
+    idx = 0
+    with tabs[idx]:
         dashboard_tab(df_filtered)
-    with tabs[1]:
-        opportunities_tab(df_filtered)
-    with tabs[2]:
+    idx += 1
+    if not safe_mode:
+        with tabs[idx]:
+            opportunities_tab(df_filtered)
+        idx += 1
+    with tabs[idx]:
         brand_performance_tab(df_filtered)
-    with tabs[3]:
+    idx += 1
+    with tabs[idx]:
         brand_comparison_tab(df_filtered)
-    with tabs[4]:
+    idx += 1
+    with tabs[idx]:
         zalando_performance_tab(df_filtered)
-    with tabs[5]:
+    idx += 1
+    with tabs[idx]:
         virtual_shopping_room(df_filtered)
 
 if __name__ == "__main__":
