@@ -727,9 +727,9 @@ def opportunities_tab(df):
             summary = comp_df.groupby('brand_clean').agg(median_pack_price=('final_price', 'median'), median_item_price=('price_per_item', 'median'), avg_discount=('discount_pct', 'mean')).reindex(compare_brands)
             st.dataframe(smart_style(summary.reset_index().rename(columns={'brand_clean': 'Brand'})), use_container_width=True, column_config={'avg_discount': st.column_config.NumberColumn(format="%.1f%%")})
             if 'price_band_item' in comp_df.columns:
-                band_share = comp_df.groupby(['brand_clean','price_band_item']).size()
-                band_share = band_share.groupby(level=0).apply(lambda s: s / s.sum()).rename('share').reset_index()
-                fig = px.bar(band_share, x='price_band_item', y='share', color='brand_clean', barmode='group', category_orders={'price_band_item': PRICE_LABELS}, labels={'price_band_item': 'Price Band (Item)', 'share': 'Share', 'brand_clean': 'Brand'})
+                counts = comp_df.groupby(['brand_clean','price_band_item']).size().reset_index(name='count')
+                counts['share'] = counts['count'] / counts.groupby('brand_clean')['count'].transform('sum')
+                fig = px.bar(counts, x='price_band_item', y='share', color='brand_clean', barmode='group', category_orders={'price_band_item': PRICE_LABELS}, labels={'price_band_item': 'Price Band (Item)', 'share': 'Share', 'brand_clean': 'Brand'})
                 st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No competitor data available for this subcategory.")
