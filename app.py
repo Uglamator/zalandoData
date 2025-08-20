@@ -583,7 +583,8 @@ def opportunities_tab(df):
 
     with col1:
         st.markdown("**High demand (low stock, no discount)**")
-        high_demand = df[df.get('is_high_demand', False)].copy()
+        mask_high = df['is_high_demand'] if 'is_high_demand' in df.columns else pd.Series(False, index=df.index)
+        high_demand = df[mask_high].copy()
         if not high_demand.empty:
             high_demand = high_demand.sort_values('in_stock_pct').head(15)
             st.dataframe(
@@ -603,7 +604,8 @@ def opportunities_tab(df):
 
     with col2:
         st.markdown("**Clearance candidates (≥50% discount)**")
-        clearance = df[df.get('is_clearance_candidate', False)].copy()
+        mask_clear = df['is_clearance_candidate'] if 'is_clearance_candidate' in df.columns else pd.Series(False, index=df.index)
+        clearance = df[mask_clear].copy()
         if not clearance.empty:
             clearance = clearance.sort_values('discount_pct', ascending=False).head(15)
             st.dataframe(
