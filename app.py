@@ -7,6 +7,7 @@ import re
 import json
 import requests
 import io
+import unicodedata
 
 # Optional: virtualized tables
 try:
@@ -199,18 +200,85 @@ def extract_main_category(text):
             return v
     return None
 
+def _normalize_text_basic(s: str) -> str:
+    s = s.strip().lower()
+    s = unicodedata.normalize('NFKD', s)
+    s = ''.join(ch for ch in s if not unicodedata.combining(ch))
+    s = s.replace('-', ' ')
+    s = re.sub(r'\s+', ' ', s)
+    return s
+
+def make_pretty_specific_label(slug_norm: str) -> str:
+    pretty = slug_norm.replace('-', ' ').strip()
+    pretty = re.sub(r'\s+', ' ', pretty)
+    # Common fix-ups
+    pretty = pretty.replace('t shirt', 't-shirt').replace('push up', 'push-up').replace('g string', 'g-string')
+    # Title case words
+    pretty = ' '.join(w.capitalize() for w in pretty.split(' '))
+    return pretty
+
 def extract_specific_category(text):
     if not isinstance(text, str):
         return None
-    text_lc = text.lower()
+    text_norm = _normalize_text_basic(text)
     for k, v in SPECIFIC_CATEGORY_MAP.items():
-        if k in text_lc:
+        if k in text_norm:
             return v
-    text_lc_nohyphen = text_lc.replace('-', ' ')
+    text_compact = text_norm.replace(' ', '')
     for k, v in SPECIFIC_CATEGORY_MAP.items():
-        if k in text_lc_nohyphen:
+        if k.replace('-', '') in text_compact:
             return v
     return None
+
+def extract_slug_from_path(di: str) -> str:
+    try:
+        if isinstance(di, str) and di.startswith('{'):
+            d = json.loads(di)
+            url = d.get('url', '')
+            di = url
+        if isinstance(di, str):
+            parts = [p for p in di.split('/') if p]
+            slug = parts[-2] if parts and parts[-1].endswith('.html') and len(parts) > 1 else (parts[-1] if parts else '')
+            return slug
+    except Exception:
+        return ''
+    return ''
+
+def extract_specific_category_from_discovery_input(di):
+    """Extracts a subcategory from discovery_input (JSON or path) using SPECIFIC_CATEGORY_MAP, else pretty label."""
+    slug = extract_slug_from_path(di)
+    if not slug:
+        return None
+    slug_norm = _normalize_text_basic(slug)
+    if slug_norm in SPECIFIC_CATEGORY_MAP:
+        return SPECIFIC_CATEGORY_MAP[slug_norm]
+    for k, v in SPECIFIC_CATEGORY_MAP.items():
+        if k in slug_norm or k.replace('-', '') in slug_norm.replace(' ', ''):
+            return v
+    # Fallback: derive a readable label from slug
+    return make_pretty_specific_label(slug_norm)
+
+def build_dynamic_specific_map(df: pd.DataFrame, top_n: int = 50) -> dict:
+    """Scan discovery_input and product_url to build additional specific category labels for common slugs not in SPECIFIC_CATEGORY_MAP."""
+    candidates = []
+    for col in ['discovery_input', 'product_url']:
+        if col in df.columns:
+            col_vals = df[col].dropna().astype(str).head(50000)  # cap scan for performance
+            slugs = col_vals.map(extract_slug_from_path)
+            candidates.extend([s for s in slugs if s])
+    if not candidates:
+        return {}
+    # Normalize and count
+    norm_counts = {}
+    for s in candidates:
+        n = _normalize_text_basic(s)
+        if not n or n in SPECIFIC_CATEGORY_MAP:
+            continue
+        norm_counts[n] = norm_counts.get(n, 0) + 1
+    # Take top_n and generate pretty labels
+    top = sorted(norm_counts.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    dynamic_map = {n: make_pretty_specific_label(n) for n, _ in top}
+    return dynamic_map
 
 def extract_cat_from_discovery_input(di):
     try:
@@ -313,21 +381,42 @@ def clean_name_columns(df):
     return df
 
 def clean_category_columns(df):
-    # Use discovery_input if available and not generic, else fall back to name
+    # Build dynamic subcategory augmentation from data
+    dynamic_specific_map = build_dynamic_specific_map(df)
+    GENERIC_SLUGS = {'womens-clothing-underwear', 'womens clothing underwear', 'lingerie', 'underwear'}
     def get_main_cat(row):
         disc = row.get('discovery_input', '')
         name = row.get('name', '')
         main_cat = extract_main_category(disc)
-        if (not main_cat) or (disc.lower() in ['womens-clothing-underwear', 'womens clothing underwear', 'lingerie', 'underwear']):
+        if (not main_cat) or (isinstance(disc, str) and _normalize_text_basic(disc) in GENERIC_SLUGS):
             main_cat = extract_main_category(name)
         return main_cat
     def get_spec_cat(row):
         disc = row.get('discovery_input', '')
         name = row.get('name', '')
-        spec_cat = extract_specific_category(disc)
-        if (not spec_cat) or (disc.lower() in ['womens-clothing-underwear', 'womens clothing underwear', 'lingerie', 'underwear']):
-            spec_cat = extract_specific_category(name)
-        return spec_cat
+        best_name = row.get('best_name', '')
+        product_url = row.get('product_url', '')
+        # 1) Try discovery input slug
+        spec = extract_specific_category_from_discovery_input(disc)
+        # 2) Try product URL path
+        if not spec and isinstance(product_url, str) and product_url:
+            spec = extract_specific_category_from_discovery_input(product_url)
+        # 3) Try dynamic map using slug from disc/url
+        if not spec:
+            for src in (disc, product_url):
+                slug = extract_slug_from_path(src)
+                sn = _normalize_text_basic(slug) if slug else ''
+                if sn in dynamic_specific_map:
+                    spec = dynamic_specific_map[sn]
+                    break
+        # 4) Try best_name then name
+        if not spec:
+            spec = extract_specific_category(best_name) or extract_specific_category(name)
+        # 5) Default to pretty slug if available, else 'Other'
+        if not spec:
+            any_slug = extract_slug_from_path(disc) or extract_slug_from_path(product_url)
+            spec = make_pretty_specific_label(_normalize_text_basic(any_slug)) if any_slug else 'Other'
+        return spec
     df['category_clean'] = df.apply(get_main_cat, axis=1)
     df['specific_category'] = df.apply(get_spec_cat, axis=1)
     return df
@@ -1859,6 +1948,20 @@ def dashboard_tab(df):
                          use_container_width=True)
     else:
         st.info("No products sold in packs match the current filter criteria.")
+
+def extract_specific_category_from_discovery_input(di):
+    """Extracts a subcategory from discovery_input (JSON or path) using SPECIFIC_CATEGORY_MAP, else pretty label."""
+    slug = extract_slug_from_path(di)
+    if not slug:
+        return None
+    slug_norm = _normalize_text_basic(slug)
+    if slug_norm in SPECIFIC_CATEGORY_MAP:
+        return SPECIFIC_CATEGORY_MAP[slug_norm]
+    for k, v in SPECIFIC_CATEGORY_MAP.items():
+        if k in slug_norm or k.replace('-', '') in slug_norm.replace(' ', ''):
+            return v
+    # Fallback: derive a readable label from slug
+    return make_pretty_specific_label(slug_norm)
 
 # --- Main App ---
 def main():
