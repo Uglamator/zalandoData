@@ -8,6 +8,9 @@ import json
 import requests
 import io
 import unicodedata
+from typing import Optional
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 
 # Optional: virtualized tables
 try:
@@ -530,23 +533,64 @@ def adjust_for_pack_size(df):
 
 RAW_CSV = 'https://raw.githubusercontent.com/Uglamator/zalandoData/main/cleaned_zalando_data.csv'
 
+DB_TABLE = os.getenv('DB_TABLE', 'products')
+DB_CONN_STR = os.getenv('DATABASE_URL') or os.getenv('DB_URL') or os.getenv('POSTGRES_URL')
+
+
+def _make_engine() -> Optional[Engine]:
+    """Create a SQLAlchemy engine from env, returning None if not configured."""
+    try:
+        if not DB_CONN_STR:
+            return None
+        # Render may provide postgres URLs without driver; normalize scheme
+        conn = DB_CONN_STR
+        if conn.startswith('postgres://'):
+            conn = conn.replace('postgres://', 'postgresql+psycopg2://', 1)
+        elif conn.startswith('postgresql://') and 'postgresql+psycopg2://' not in conn:
+            conn = conn.replace('postgresql://', 'postgresql+psycopg2://', 1)
+        engine = create_engine(conn, pool_pre_ping=True)
+        return engine
+    except Exception:
+        return None
+
+
+def _load_from_db(limit: Optional[int] = None) -> pd.DataFrame:
+    """Attempt to load cleaned dataset from the configured database table."""
+    engine = _make_engine()
+    if engine is None:
+        return pd.DataFrame()
+    query = f"SELECT * FROM {DB_TABLE}"
+    if limit and isinstance(limit, int):
+        query += f" LIMIT {int(limit)}"
+    try:
+        with engine.connect() as conn:
+            return pd.read_sql(text(query), conn)
+    except Exception:
+        return pd.DataFrame()
+
 
 @st.cache_data # Cache the data loading process
 def load_data():
     """
     Downloads the pre-cleaned data from GitHub and returns a DataFrame.
+    Tries database first (if configured), then falls back to CSV.
     The result is cached to prevent re-downloading on every interaction.
     """
+    # 1) Try DB
+    try:
+        df_db = _load_from_db()
+        if df_db is not None and not df_db.empty:
+            return df_db
+    except Exception:
+        pass
+    # 2) Fallback to CSV
     try:
         # Use requests to reliably fetch the data, handling redirects
         response = requests.get(RAW_CSV, timeout=15)
         response.raise_for_status()  # Raise an exception for bad responses (4xx or 5xx)
-
         # Read the cleaned CSV content directly into a DataFrame
         cleaned_df = pd.read_csv(io.StringIO(response.text))
-        
         return cleaned_df
-
     except requests.exceptions.RequestException as e:
         st.error(f"Failed to download data: {e}")
         return pd.DataFrame() # Return an empty DataFrame on error
@@ -1750,6 +1794,7 @@ def show_user_guide():
 
 def dashboard_tab(df):
     st.header("Dashboard")
+    _db_status_widget()
     render_data_status(df)
     st.markdown("---")
     # --- What changed this week? ---
@@ -1962,6 +2007,24 @@ def extract_specific_category_from_discovery_input(di):
             return v
     # Fallback: derive a readable label from slug
     return make_pretty_specific_label(slug_norm)
+
+def _db_status_widget():
+    engine = _make_engine()
+    ok = engine is not None
+    col1, col2 = st.columns(2)
+    with col1:
+        st.caption("Database")
+        st.metric(label="Connection", value=("OK" if ok else "Not configured"))
+    with col2:
+        count_txt = "N/A"
+        if ok:
+            try:
+                with engine.connect() as conn:
+                    res = conn.execute(text(f"SELECT COUNT(*) FROM {DB_TABLE}"))
+                    count_txt = f"{list(res)[0][0]:,}"
+            except Exception:
+                count_txt = "Error"
+        st.metric(label="Rows", value=count_txt)
 
 # --- Main App ---
 def main():
