@@ -11,6 +11,7 @@ import unicodedata
 from typing import Optional
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+import plotly.io as pio
 
 # Optional: virtualized tables
 try:
@@ -23,6 +24,22 @@ except Exception:
 # ---- Constants (shared across tabs) ----
 PRICE_BINS = [0, 20, 30, 40, 50, 60, 1e6]
 PRICE_LABELS = ['<20€', '20-30€', '30-40€', '40-50€', '50-60€', '60€+']
+
+# Branding palette (soft, elegant tones suitable for lingerie dashboards)
+BRAND_PALETTE = [
+    '#9B1B30',  # deep burgundy
+    '#C9A46B',  # gold sand
+    '#6C5B7B',  # muted plum
+    '#2C3E50',  # charcoal
+    '#B56576',  # rosewood
+    '#F2D7D9',  # blush
+]
+
+# Plotly global defaults
+pio.templates.default = 'simple_white'
+px.defaults.template = 'simple_white'
+px.defaults.color_discrete_sequence = BRAND_PALETTE
+px.defaults.height = 360
 
 # =====================
 # Data Cleaning Helpers
@@ -966,7 +983,7 @@ def opportunities_tab(df):
         brand_sizes = get_size_counts_simple(df_brand)
         size_cov = pd.DataFrame({'Market': market_sizes, brand_of_interest: brand_sizes}).fillna(0).astype(int).sort_index()
         st.dataframe(size_cov.head(row_cap), use_container_width=True, height=350)
-        st.plotly_chart(px.bar(size_cov.head(row_cap), barmode='group', labels={'value': 'Count', 'index': 'Size'}), use_container_width=True)
+        st.plotly_chart(style_fig(px.bar(size_cov.head(row_cap), barmode='group', labels={'value': 'Count', 'index': 'Size'})), use_container_width=True)
 
     st.markdown("---")
 
@@ -979,7 +996,8 @@ def opportunities_tab(df):
         packs_df['is_pack'] = packs_df['pack_size'] > 1
         mix = packs_df['is_pack'].value_counts(normalize=True).rename(index={True: 'Pack', False: 'Single'})
         if not mix.empty:
-            st.plotly_chart(px.pie(names=mix.index, values=mix.values, title='Pack vs Single Mix'), use_container_width=True)
+            fig = px.pie(names=mix.index, values=mix.values, title='Pack vs Single Mix')
+            st.plotly_chart(style_fig(fig), use_container_width=True)
         # Singles vs Packs table (sorted by index desc)
         st.dataframe(packs_df.sort_index(ascending=False).head(row_cap), use_container_width=True, height=350)
     if {'price_per_item', 'specific_category'}.issubset(packs_df.columns):
@@ -1017,7 +1035,7 @@ def opportunities_tab(df):
                 counts = comp_df.groupby(['brand_clean','price_band_item']).size().reset_index(name='count')
                 counts['share'] = counts['count'] / counts.groupby('brand_clean')['count'].transform('sum')
                 fig = px.bar(counts, x='price_band_item', y='share', color='brand_clean', barmode='group', category_orders={'price_band_item': PRICE_LABELS}, labels={'price_band_item': 'Price Band (Item)', 'share': 'Share', 'brand_clean': 'Brand'})
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(style_fig(fig), use_container_width=True)
     else:
             st.info("No competitor data available for this subcategory.")
 
@@ -1191,10 +1209,22 @@ def executive_summary(df):
     st.header("Executive Summary")
     col1, col2, col3, col4 = st.columns(4)
     dorina_df = df[df['brand_clean'].str.contains('Dorina', case=False, na=False)]
-    col1.metric("Total Products (Dorina)", f"{len(dorina_df):,}")
-    col2.metric("Avg Price (Dorina)", f"€{dorina_df['final_price'].mean():.2f}")
-    col3.metric("Avg Discount (Dorina)", f"{dorina_df['discount_pct'].mean():.2f}%")
-    col4.metric("Categories", f"{dorina_df['category_clean'].nunique()}")
+    with col1:
+        st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+        st.metric("Total Products (Dorina)", f"{len(dorina_df):,}")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with col2:
+        st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+        st.metric("Avg Price (Dorina)", f"€{dorina_df['final_price'].mean():.2f}")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with col3:
+        st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+        st.metric("Avg Discount (Dorina)", f"{dorina_df['discount_pct'].mean():.2f}%")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with col4:
+        st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+        st.metric("Categories", f"{dorina_df['category_clean'].nunique()}")
+        st.markdown("</div>", unsafe_allow_html=True)
 
 def market_share_by_brand(df):
     """
@@ -1209,11 +1239,11 @@ def market_share_by_brand(df):
         x=brand_counts.index,
         y=brand_counts.values,
         color=["Dorina" if "dorina" in str(b).lower() else "Other" for b in brand_counts.index],
-        color_discrete_map={"Dorina": "#e74c3c", "Other": "#3498db"},
+        color_discrete_map={"Dorina": "#9B1B30", "Other": "#6C5B7B"},
         labels={'x': 'Brand', 'y': 'Number of Products'},
         title="Product Count by Brand (Dorina Highlighted)"
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(style_fig(fig), use_container_width=True)
     # Table
     brand_table = pd.DataFrame({'Brand': brand_counts.index, 'Product_Count': brand_counts.values})
     st.dataframe(smart_style(brand_table), use_container_width=True)
@@ -1254,9 +1284,9 @@ def average_price_by_brand(df):
         barmode='group',
         labels={'x': 'Brand', 'y': 'Average Price (€)'},
         title="Average Price by Brand: Pack vs. Item (Dorina Highlighted)",
-        color_discrete_map={"Avg Price (Pack)": "#3498db", "Avg Price (Item)": "#e74c3c"}
+        color_discrete_map={"Avg Price (Pack)": "#2C3E50", "Avg Price (Item)": "#C9A46B"}
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(style_fig(fig), use_container_width=True)
     
     # Table
     st.dataframe(smart_style(price_comparison_df.set_index('Brand')), use_container_width=True)
@@ -1304,7 +1334,7 @@ def category_deep_dives(df):
         labels={'x': 'Brand', 'y': 'Avg Price (€)'},
         title="Average Price by Brand"
     )
-    st.plotly_chart(fig_price, use_container_width=True)
+    st.plotly_chart(style_fig(fig_price), use_container_width=True)
     # --- SKU Count by Brand (top 10 + selected) ---
     sku_count_by_brand = cat_df[cat_df['brand_clean'].isin(top_brands)].groupby('brand_clean').size().reindex(top_brands)
     color_map_counts = {b: ('#e74c3c' if b == selected_brand else '#3498db') for b in sku_count_by_brand.index}
@@ -1317,7 +1347,7 @@ def category_deep_dives(df):
         labels={'x': 'Brand', 'y': 'SKU Count'},
         title="SKU Count by Brand"
     )
-    st.plotly_chart(fig_count, use_container_width=True)
+    st.plotly_chart(style_fig(fig_count), use_container_width=True)
     # --- Color Mix: Separate Bar Charts, Top 10 Colors by Category/Subcategory ---
     st.markdown("**Color Mix (SKU Count)**")
     cat_color = cat_df['color_clean'].value_counts().head(10)
@@ -1326,11 +1356,11 @@ def category_deep_dives(df):
     # Category chart
     fig_cat_color = px.bar(x=color_order, y=cat_color.values,
                           labels={'x': 'Color', 'y': 'SKU Count'}, title="Category Color Mix (Top 10)")
-    st.plotly_chart(fig_cat_color, use_container_width=True)
+    st.plotly_chart(style_fig(fig_cat_color), use_container_width=True)
     # Brand chart
     fig_brand_color = px.bar(x=color_order, y=brand_color.values,
                             labels={'x': 'Color', 'y': 'SKU Count'}, title=f"{selected_brand} Color Mix (Top 10)")
-    st.plotly_chart(fig_brand_color, use_container_width=True)
+    st.plotly_chart(style_fig(fig_brand_color), use_container_width=True)
     # --- Price Band Mix (side-by-side barchart) ---
     st.markdown("**Price Band Mix**")
     brand_band = pd.cut(filtered['final_price'], bins=PRICE_BINS, labels=PRICE_LABELS, right=False)
@@ -1339,7 +1369,7 @@ def category_deep_dives(df):
                            'Category': cat_band.value_counts(normalize=True).reindex(PRICE_LABELS, fill_value=0)}, index=PRICE_LABELS)
     fig_band = px.bar(band_df.reset_index(), x='index', y=[selected_brand, 'Category'], barmode='group',
                      labels={'value': 'Share', 'index': 'Price Band'}, title="Price Band Mix: Brand vs. Category")
-    st.plotly_chart(fig_band, use_container_width=True)
+    st.plotly_chart(style_fig(fig_band), use_container_width=True)
     # --- Metric Cards for Discount and In-Stock % ---
     st.markdown("---")
     st.subheader("Brand vs. Category Metrics")
@@ -1397,7 +1427,7 @@ def deep_dive_by_specific_category(df):
         labels={'x': 'Brand', 'y': 'Avg Price (€)'},
         title="Average Price by Brand"
     )
-    st.plotly_chart(fig_price, use_container_width=True)
+    st.plotly_chart(style_fig(fig_price), use_container_width=True)
     # --- SKU Count by Brand (top 10 + selected) ---
     sku_count_by_brand = subcat_df[subcat_df['brand_clean'].isin(top_brands)].groupby('brand_clean').size().reindex(top_brands)
     color_map_counts = {b: ('#e74c3c' if b == selected_brand else '#3498db') for b in sku_count_by_brand.index}
@@ -1410,7 +1440,7 @@ def deep_dive_by_specific_category(df):
         labels={'x': 'Brand', 'y': 'SKU Count'},
         title="SKU Count by Brand"
     )
-    st.plotly_chart(fig_count, use_container_width=True)
+    st.plotly_chart(style_fig(fig_count), use_container_width=True)
     # --- Color Mix (side-by-side barchart, absolute SKU count) ---
     st.markdown("**Color Mix (SKU Count)**")
     brand_color = filtered['color_clean'].value_counts()
@@ -1420,7 +1450,7 @@ def deep_dive_by_specific_category(df):
                             'Subcategory': subcat_color.reindex(color_index, fill_value=0)}, index=color_index)
     fig_color = px.bar(color_df.reset_index(), x='index', y=[selected_brand, 'Subcategory'], barmode='group',
                       labels={'value': 'SKU Count', 'index': 'Color'}, title="Color Mix (SKU Count): Brand vs. Subcategory")
-    st.plotly_chart(fig_color, use_container_width=True)
+    st.plotly_chart(style_fig(fig_color), use_container_width=True)
     # --- Price Band Mix (side-by-side barchart) ---
     st.markdown("**Price Band Mix**")
     brand_band = pd.cut(filtered['final_price'], bins=PRICE_BINS, labels=PRICE_LABELS, right=False)
@@ -1429,7 +1459,7 @@ def deep_dive_by_specific_category(df):
                            'Subcategory': subcat_band.value_counts(normalize=True).reindex(PRICE_LABELS, fill_value=0)}, index=PRICE_LABELS)
     fig_band = px.bar(band_df.reset_index(), x='index', y=[selected_brand, 'Subcategory'], barmode='group',
                      labels={'value': 'Share', 'index': 'Price Band'}, title="Price Band Mix: Brand vs. Subcategory")
-    st.plotly_chart(fig_band, use_container_width=True)
+    st.plotly_chart(style_fig(fig_band), use_container_width=True)
     # --- Metric Cards for Discount and In-Stock % ---
     st.markdown("---")
     st.subheader("Brand vs. Subcategory Metrics")
@@ -1497,28 +1527,33 @@ def zalando_performance_tab(df):
     # ASP by Main Category
     st.subheader("Average Selling Price (ASP) by Main Category")
     cat_asp = df.groupby('category_clean')['final_price'].mean().round(2).sort_values(ascending=False)
-    st.bar_chart(cat_asp)
+    fig = px.bar(cat_asp)
+    st.plotly_chart(style_fig(fig), use_container_width=True)
     st.dataframe(cat_asp.reset_index().rename(columns={'final_price': 'ASP (€)'}).round(2), use_container_width=True)
     # ASP by Specific Category
     st.subheader("Average Selling Price (ASP) by Specific Category (Top 20)")
     subcat_asp = df.groupby('specific_category')['final_price'].mean().round(2).sort_values(ascending=False).head(20)
-    st.bar_chart(subcat_asp)
+    fig = px.bar(subcat_asp)
+    st.plotly_chart(style_fig(fig), use_container_width=True)
     st.dataframe(subcat_asp.reset_index().rename(columns={'final_price': 'ASP (€)'}).round(2), use_container_width=True)
     st.markdown("---")
     # By Main Category
     st.subheader("Average Discount by Main Category")
     cat_discount = df.groupby('category_clean')['discount_pct'].mean().round(2).sort_values(ascending=False)
-    st.bar_chart(cat_discount)
+    fig = px.bar(cat_discount)
+    st.plotly_chart(style_fig(fig), use_container_width=True)
     st.dataframe(cat_discount.reset_index().rename(columns={'discount_pct': 'Avg Discount (%)'}).round(2), use_container_width=True)
     # By Brand
     st.subheader("Average Discount by Brand (Top 20)")
     brand_discount = df.groupby('brand_clean')['discount_pct'].mean().round(2).sort_values(ascending=False).head(20)
-    st.bar_chart(brand_discount)
+    fig = px.bar(brand_discount)
+    st.plotly_chart(style_fig(fig), use_container_width=True)
     st.dataframe(brand_discount.reset_index().rename(columns={'discount_pct': 'Avg Discount (%)'}).round(2), use_container_width=True)
     # By Specific Category
     st.subheader("Average Discount by Specific Category (Top 20)")
     subcat_discount = df.groupby('specific_category')['discount_pct'].mean().round(2).sort_values(ascending=False).head(20)
-    st.bar_chart(subcat_discount)
+    fig = px.bar(subcat_discount)
+    st.plotly_chart(style_fig(fig), use_container_width=True)
     st.dataframe(subcat_discount.reset_index().rename(columns={'discount_pct': 'Avg Discount (%)'}).round(2), use_container_width=True)
     # Summary Table
     st.subheader("Discount Summary Table (Category x Brand)")
@@ -1544,7 +1579,7 @@ def brand_comparison_tab(df):
     fig_cat = px.bar(cat_counts, x='category_clean', y='count', color='brand_clean', barmode='group', labels={'count': 'Product Count', 'category_clean': 'Main Category', 'brand_clean': 'Brand'})
     col1, col2 = st.columns(2)
     with col1:
-        st.plotly_chart(fig_cat, use_container_width=True)
+        st.plotly_chart(style_fig(fig_cat), use_container_width=True)
     with col2:
         st.dataframe(cat_counts.pivot(index='category_clean', columns='brand_clean', values='count').fillna(0), use_container_width=True)
 
@@ -1556,7 +1591,7 @@ def brand_comparison_tab(df):
     fig_subcat = px.bar(subcat_counts, x='specific_category', y='count', color='brand_clean', barmode='group', labels={'count': 'Product Count', 'specific_category': 'Specific Category', 'brand_clean': 'Brand'})
     col1, col2 = st.columns(2)
     with col1:
-        st.plotly_chart(fig_subcat, use_container_width=True)
+        st.plotly_chart(style_fig(fig_subcat), use_container_width=True)
     with col2:
         st.dataframe(subcat_counts.pivot(index='specific_category', columns='brand_clean', values='count').fillna(0), use_container_width=True)
 
@@ -1566,7 +1601,7 @@ def brand_comparison_tab(df):
     fig_asp = px.bar(asp, x='category_clean', y='final_price', color='brand_clean', barmode='group', labels={'final_price': 'ASP (€)', 'category_clean': 'Main Category', 'brand_clean': 'Brand'})
     col1, col2 = st.columns(2)
     with col1:
-        st.plotly_chart(fig_asp, use_container_width=True)
+        st.plotly_chart(style_fig(fig_asp), use_container_width=True)
     with col2:
         st.dataframe(asp.pivot(index='category_clean', columns='brand_clean', values='final_price').round(2).fillna(0), use_container_width=True)
 
@@ -1576,7 +1611,7 @@ def brand_comparison_tab(df):
     fig_disc = px.bar(disc, x='category_clean', y='discount_pct', color='brand_clean', barmode='group', labels={'discount_pct': 'Avg Discount (%)', 'category_clean': 'Main Category', 'brand_clean': 'Brand'})
     col1, col2 = st.columns(2)
     with col1:
-        st.plotly_chart(fig_disc, use_container_width=True)
+        st.plotly_chart(style_fig(fig_disc), use_container_width=True)
     with col2:
         st.dataframe(disc.pivot(index='category_clean', columns='brand_clean', values='discount_pct').round(2).fillna(0), use_container_width=True)
 
@@ -1617,7 +1652,7 @@ def brand_comparison_tab(df):
     fig_size = px.bar(size_curve_df, barmode='group', labels={'value': 'Count', 'index': 'Size'})
     col1, col2 = st.columns(2)
     with col1:
-        st.plotly_chart(fig_size, use_container_width=True)
+        st.plotly_chart(style_fig(fig_size), use_container_width=True)
     with col2:
         st.dataframe(size_curve_df, use_container_width=True)
 
@@ -1710,7 +1745,7 @@ def brand_performance_tab(df):
     fig_pie = px.pie(bucket_counts, names=bucket_counts.index, values=bucket_counts.values, title='SKU In-stock Rate Buckets')
     col1, col2 = st.columns(2)
     with col1:
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(style_fig(fig_pie), use_container_width=True)
     with col2:
         st.dataframe(sku_instock_df[['name', 'in_stock', 'total', 'in_stock_pct', 'instock_bucket', 'final_price', 'discount_pct']], use_container_width=True)
 
@@ -1897,7 +1932,8 @@ def dashboard_tab(df):
         st.markdown("**Price Band Mix (Per Item)**")
         price_band_item = pd.cut(filtered['price_per_item'], bins=PRICE_BINS, labels=PRICE_LABELS, right=False)
         price_counts_item = price_band_item.value_counts().reindex(PRICE_LABELS, fill_value=0)
-        st.plotly_chart(px.bar(x=PRICE_LABELS, y=price_counts_item.values, labels={'x': 'Price Band (Per Item)', 'y': 'SKUs'}), use_container_width=True)
+        fig = px.bar(x=PRICE_LABELS, y=price_counts_item.values, labels={'x': 'Price Band (Per Item)', 'y': 'SKUs'})
+        st.plotly_chart(style_fig(fig), use_container_width=True)
     with colB:
         st.markdown("**Color Mix**")
         if 'color_clean' in filtered.columns:
@@ -1912,7 +1948,8 @@ def dashboard_tab(df):
             if not other_colors.empty:
                 pie_labels.append('Other')
                 pie_values.append(other_colors.sum())
-            st.plotly_chart(px.pie(names=pie_labels, values=pie_values, title=None), use_container_width=True)
+            fig = px.pie(names=pie_labels, values=pie_values)
+            st.plotly_chart(style_fig(fig), use_container_width=True)
     st.markdown("---")
     # --- Third Row: Actionable Tables ---
     with st.expander("Top Discounted Products", expanded=False):
@@ -1980,17 +2017,13 @@ def dashboard_tab(df):
         with col1:
             st.markdown("**Distribution of Pack Sizes**")
             pack_counts = packs_df['pack_size'].value_counts().sort_index()
-            st.plotly_chart(px.bar(pack_counts, 
-                                   x=pack_counts.index, 
-                                   y=pack_counts.values, 
-                                   labels={'x': 'Pack Size', 'y': 'Number of SKUs'}),
-                            use_container_width=True)
+            fig = px.bar(pack_counts, x=pack_counts.index, y=pack_counts.values, labels={'x': 'Pack Size', 'y': 'Number of SKUs'})
+            st.plotly_chart(style_fig(fig), use_container_width=True)
 
         with col2:
             st.markdown("**Top 10 Brands Selling in Packs**")
             brand_pack_counts = packs_df['brand_clean'].value_counts().head(10)
-            st.dataframe(brand_pack_counts.reset_index().rename(columns={'index': 'Brand', 'brand_clean': 'SKU Count'}),
-                         use_container_width=True)
+            st.dataframe(brand_pack_counts.reset_index().rename(columns={'index': 'Brand', 'brand_clean': 'SKU Count'}), use_container_width=True)
     else:
         st.info("No products sold in packs match the current filter criteria.")
 
@@ -2042,35 +2075,22 @@ def main():
     # Custom CSS for better styling
     st.markdown("""
     <style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
+    :root {
+        --accent: #9B1B30; /* deep burgundy */
+        --accent-2: #C9A46B; /* sand */
+        --bg: #ffffff;
+        --muted: #6B7280; /* slate */
     }
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border-left: 4px solid #1f77b4;
-    }
-    .stTabs [data-baseweb=\"tab-list\"] {
-        gap: 2rem;
-    }
-    .stTabs [data-baseweb=\"tab\"] {
-        height: 4rem;
-        white-space: pre-wrap;
-        background-color: #f0f2f6;
-        border-radius: 4px 4px 0px 0px;
-        gap: 1rem;
-        padding-top: 10px;
-        padding-bottom: 10px;
-    }
-    .stTabs [aria-selected=\"true\"] {
-        background-color: #1f77b4;
-        color: white;
-    }
+    .main-header { font-size: 2.6rem; font-weight: 800; letter-spacing: .2px; color: var(--accent); text-align: left; margin: 0 0 1rem 0; }
+    .metric-card { background: linear-gradient(180deg, #ffffff, #faf7f8); padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid #f1f1f3; box-shadow: 0 2px 10px rgba(0,0,0,0.04); }
+    .stMetric > div { overflow: visible; }
+    .stTabs [data-baseweb="tab-list"] { gap: 1rem; }
+    .stTabs [data-baseweb="tab"] { height: 3.25rem; background-color: #fff; border: 1px solid #f1f1f3; border-bottom: none; border-radius: 10px 10px 0 0; padding: 8px 14px; color: #374151; }
+    .stTabs [aria-selected="true"] { background-color: var(--accent); color: white; border-color: var(--accent); }
+    .css-1v0mbdj, .block-container { padding-top: 1rem; }
+    .small-muted { color: var(--muted); font-size: .85rem; }
+    .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; border: 1px solid #E5E7EB; background: #fff; font-size: .8rem; color: #374151; }
+    .callout { border-left: 4px solid var(--accent); background: #fff7f9; padding: .75rem 1rem; border-radius: 8px; }
     </style>
     """, unsafe_allow_html=True)
     
