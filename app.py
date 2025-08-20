@@ -570,26 +570,27 @@ def opportunities_tab(df):
     default_brand = st.session_state.get('global_brand') if st.session_state.get('global_brand') in brands else ('Dorina' if 'Dorina' in brands else (brands[0] if brands else None))
     brand_of_interest = st.selectbox("Brand", brands, index=(brands.index(default_brand) if default_brand in brands else 0)) if brands else None
 
+    # Global performance knobs
+    col_knob1, col_knob2, col_knob3 = st.columns([1,1,2])
+    with col_knob1:
+        row_cap = st.slider("Row cap", min_value=100, max_value=5000, value=500, step=100, help="Limit rows shown in tables to reduce memory use")
+    with col_knob2:
+        sample_cap = st.slider("Sample cap", min_value=1000, max_value=50000, value=10000, step=1000, help="Max rows used in heavy aggregations")
+
     # Ensure derived columns
     with st.spinner("Preparing opportunity signals..."):
         df = ensure_global_derivations(df)
 
-    df_brand = df[df['brand_clean'] == brand_of_interest] if brand_of_interest else df.copy()
+    df_brand = df[df['brand_clean'] == brand_of_interest] if brand_of_interest else df
 
     # --- Opportunity Queues (stacked for clarity) ---
     st.subheader("High demand (low stock, no discount)")
     mask_high = df_brand['is_high_demand'] if 'is_high_demand' in df_brand.columns else pd.Series(False, index=df_brand.index)
-    high_demand = df_brand[mask_high].copy()
+    high_demand = df_brand[mask_high]
     if not high_demand.empty:
-        high_demand = high_demand.sort_values('in_stock_pct').head(15)
-        st.dataframe(
-            high_demand[['best_name', 'specific_category', 'in_stock', 'total', 'in_stock_pct', 'final_price']].reset_index(drop=True),
-            use_container_width=True,
-            column_config={
-                'in_stock_pct': st.column_config.NumberColumn(format="%.1f%%")
-            }
-        )
-        st.download_button("Download high-demand CSV", data=high_demand.to_csv(index=False), file_name="high_demand.csv")
+        view = high_demand[['best_name', 'specific_category', 'in_stock', 'total', 'in_stock_pct', 'final_price']].head(row_cap)
+        st.dataframe(view.reset_index(drop=True), use_container_width=True, column_config={'in_stock_pct': st.column_config.NumberColumn(format="%.1f%%")})
+        st.download_button("Download high-demand CSV", data=view.to_csv(index=False), file_name="high_demand.csv")
     else:
         st.info("No high-demand items for this brand.")
 
@@ -597,17 +598,12 @@ def opportunities_tab(df):
 
     st.subheader("Clearance candidates (≥50% discount)")
     mask_clear = df_brand['is_clearance_candidate'] if 'is_clearance_candidate' in df_brand.columns else pd.Series(False, index=df_brand.index)
-    clearance = df_brand[mask_clear].copy()
+    clearance = df_brand[mask_clear]
     if not clearance.empty:
-        clearance = clearance.sort_values('discount_pct', ascending=False).head(15)
-        st.dataframe(
-            clearance[['best_name', 'specific_category', 'discount_pct', 'final_price', 'in_stock']].reset_index(drop=True),
-            use_container_width=True,
-            column_config={
-                'discount_pct': st.column_config.NumberColumn(format="%.1f%%")
-            }
-        )
-        st.download_button("Download clearance CSV", data=clearance.to_csv(index=False), file_name="clearance_candidates.csv")
+        clearance = clearance.sort_values('discount_pct', ascending=False)
+        view = clearance[['best_name', 'specific_category', 'discount_pct', 'final_price', 'in_stock']].head(row_cap)
+        st.dataframe(view.reset_index(drop=True), use_container_width=True, column_config={'discount_pct': st.column_config.NumberColumn(format="%.1f%%")})
+        st.download_button("Download clearance CSV", data=view.to_csv(index=False), file_name="clearance_candidates.csv")
     else:
         st.info("No clearance candidates for this brand.")
 
@@ -623,11 +619,7 @@ def opportunities_tab(df):
         min_skus=20,
     ) if brand_of_interest else pd.DataFrame()
     if not gaps.empty:
-        st.dataframe(gaps, use_container_width=True, column_config={
-            'Market_Share': st.column_config.NumberColumn(format="%.1f%%"),
-            'Brand_Share': st.column_config.NumberColumn(format="%.1f%%"),
-            'Gap': st.column_config.NumberColumn(format="%.1f%%"),
-        })
+        st.dataframe(gaps.head(row_cap), use_container_width=True, column_config={'Market_Share': st.column_config.NumberColumn(format="%.1f%%"), 'Brand_Share': st.column_config.NumberColumn(format="%.1f%%"), 'Gap': st.column_config.NumberColumn(format="%.1f%%")})
         st.download_button("Download band gaps CSV", data=gaps.to_csv(index=False), file_name="band_gaps.csv")
     else:
         st.info("No significant band gaps for this brand.")
@@ -637,132 +629,110 @@ def opportunities_tab(df):
     # --- Benchmarks ---
     st.subheader(f"Benchmarks vs Market ({brand_of_interest})")
     if brand_of_interest and not df.empty and 'specific_category' in df.columns:
-        bench = df.groupby('specific_category').agg(
-            market_asp=('final_price', 'mean'),
-            market_discount=('discount_pct', 'mean'),
-        ).reset_index()
-        brand_df = df[df['brand_clean'] == brand_of_interest].groupby('specific_category').agg(
-            brand_asp=('final_price', 'mean'),
-            brand_discount=('discount_pct', 'mean'),
-        ).reset_index()
+        bench = df.groupby('specific_category').agg(market_asp=('final_price', 'mean'), market_discount=('discount_pct', 'mean')).reset_index()
+        brand_df = df[df['brand_clean'] == brand_of_interest].groupby('specific_category').agg(brand_asp=('final_price', 'mean'), brand_discount=('discount_pct', 'mean')).reset_index()
         bench_merged = pd.merge(bench, brand_df, on='specific_category', how='left')
         bench_merged['asp_delta'] = bench_merged['brand_asp'] - bench_merged['market_asp']
         bench_merged['discount_delta'] = bench_merged['brand_discount'] - bench_merged['market_discount']
         st.dataframe(
-            smart_style(bench_merged.sort_values('asp_delta', ascending=False)),
+            smart_style(bench_merged.sort_values('asp_delta', ascending=False).head(row_cap)),
             use_container_width=True,
-            column_config={
-                'market_discount': st.column_config.NumberColumn(format="%.1f%%"),
-                'brand_discount': st.column_config.NumberColumn(format="%.1f%%"),
-                'discount_delta': st.column_config.NumberColumn(format="%.1f%%"),
-            }
+            column_config={'market_discount': st.column_config.NumberColumn(format="%.1f%%"), 'brand_discount': st.column_config.NumberColumn(format="%.1f%%"), 'discount_delta': st.column_config.NumberColumn(format="%.1f%%")}
         )
         st.download_button("Download benchmarks CSV", data=bench_merged.to_csv(index=False), file_name="benchmarks_vs_market.csv")
 
     st.markdown("---")
 
-    # --- Size Intelligence ---
-    st.subheader("Size Intelligence")
-    def get_size_counts_simple(sub_df):
-        size_counter = {}
-        if 'sizes' not in sub_df.columns:
+    # --- Size Intelligence (heavy) ---
+    compute_size = st.checkbox("Compute Size Intelligence", value=False, help="Parsing size JSONs can be heavy on memory")
+    if compute_size:
+        st.subheader("Size Intelligence")
+        def get_size_counts_simple(sub_df):
+            size_counter = {}
+            if 'sizes' not in sub_df.columns:
+                return pd.Series(size_counter)
+            for sizes_json in sub_df['sizes'].dropna().head(sample_cap):
+                try:
+                    sizes = json.loads(sizes_json)
+                    for s in sizes:
+                        if s.get('availability', True):
+                            name = s.get('name') or s.get('size') or s.get('label') or ''
+                            if not isinstance(name, str):
+                                continue
+                            match = re.match(r'^([0-9]{2}/[0-9]{2})', name)
+                            if not match:
+                                match = re.match(r'^([0-9]+[A-Za-z]+)', name)
+                            if not match:
+                                match = re.match(r'^([0-9]+)', name)
+                            if match:
+                                clean_size = match.group(1)
+                                if clean_size.isdigit() and len(clean_size) > 2:
+                                    clean_size = clean_size[:2]
+                            else:
+                                match = re.match(r'^([A-Za-z0-9]+)', name)
+                                clean_size = match.group(1) if match else name
+                            size_counter[clean_size] = size_counter.get(clean_size, 0) + 1
+                except Exception:
+                    continue
             return pd.Series(size_counter)
-        for sizes_json in sub_df['sizes'].dropna():
-            try:
-                sizes = json.loads(sizes_json)
-                for s in sizes:
-                    if s.get('availability', True):
-                        name = s.get('name') or s.get('size') or s.get('label') or ''
-                        if not isinstance(name, str):
-                            continue
-                        match = re.match(r'^([0-9]{2}/[0-9]{2})', name)
-                        if not match:
-                            match = re.match(r'^([0-9]+[A-Za-z]+)', name)
-                        if not match:
-                            match = re.match(r'^([0-9]+)', name)
-                        if match:
-                            clean_size = match.group(1)
-                            if clean_size.isdigit() and len(clean_size) > 2:
-                                clean_size = clean_size[:2]
-                        else:
-                            match = re.match(r'^([A-Za-z0-9]+)', name)
-                            clean_size = match.group(1) if match else name
-                        size_counter[clean_size] = size_counter.get(clean_size, 0) + 1
-            except Exception:
-                continue
-        return pd.Series(size_counter)
-    market_sizes = get_size_counts_simple(df)
-    brand_sizes = get_size_counts_simple(df_brand)
-    size_cov = pd.DataFrame({'Market': market_sizes, brand_of_interest: brand_sizes}).fillna(0).astype(int).sort_index()
-    st.dataframe(size_cov, use_container_width=True)
-    st.plotly_chart(px.bar(size_cov, barmode='group', labels={'value': 'Count', 'index': 'Size'}), use_container_width=True)
+        market_sizes = get_size_counts_simple(df)
+        brand_sizes = get_size_counts_simple(df_brand)
+        size_cov = pd.DataFrame({'Market': market_sizes, brand_of_interest: brand_sizes}).fillna(0).astype(int).sort_index()
+        st.dataframe(size_cov.head(row_cap), use_container_width=True)
+        st.plotly_chart(px.bar(size_cov.head(row_cap), barmode='group', labels={'value': 'Count', 'index': 'Size'}), use_container_width=True)
 
     st.markdown("---")
 
     # --- Pack Analytics ---
     st.subheader("Pack Analytics")
     pack_scope = st.selectbox("Scope", [f"{brand_of_interest} only", "All brands"], index=0 if brand_of_interest else 1)
-    packs_df = df_brand.copy() if pack_scope.startswith(str(brand_of_interest)) else df.copy()
+    packs_df = (df_brand if pack_scope.startswith(str(brand_of_interest)) else df)
     if 'pack_size' in packs_df.columns:
+        packs_df = packs_df[['best_name','brand_clean','specific_category','pack_size','final_price','price_per_item']].head(sample_cap)
         packs_df['is_pack'] = packs_df['pack_size'] > 1
         mix = packs_df['is_pack'].value_counts(normalize=True).rename(index={True: 'Pack', False: 'Single'})
         if not mix.empty:
             st.plotly_chart(px.pie(names=mix.index, values=mix.values, title='Pack vs Single Mix'), use_container_width=True)
         # Singles vs Packs table (sorted by index desc)
-        packs_table = packs_df[['best_name', 'brand_clean', 'specific_category', 'pack_size', 'final_price', 'price_per_item', 'is_pack']].copy()
-        st.dataframe(packs_table.sort_index(ascending=False), use_container_width=True)
+        st.dataframe(packs_df.sort_index(ascending=False).head(row_cap), use_container_width=True)
     if {'price_per_item', 'specific_category'}.issubset(packs_df.columns):
         subcat_median = packs_df.groupby('specific_category')['price_per_item'].median().rename('subcat_item_median')
         packs_df = packs_df.merge(subcat_median, on='specific_category', how='left')
         packs_df['per_item_premium_pct'] = ((packs_df['price_per_item'] - packs_df['subcat_item_median']) / packs_df['subcat_item_median'] * 100).round(1)
-        premium = packs_df[packs_df['per_item_premium_pct'] > 20].sort_values('per_item_premium_pct', ascending=False).head(20)
-        if not premium.empty:
-            st.dataframe(
-                premium[['best_name', 'brand_clean', 'specific_category', 'pack_size', 'price_per_item', 'subcat_item_median', 'per_item_premium_pct']],
-                use_container_width=True,
-                column_config={'per_item_premium_pct': st.column_config.NumberColumn(format="%.1f%%")}
-            )
-            st.download_button("Download pack premium CSV", data=premium.to_csv(index=False), file_name="pack_per_item_premium.csv")
+        premium = packs_df[packs_df['per_item_premium_pct'] > 20].sort_values('per_item_premium_pct', ascending=False)
+        view = premium[['best_name','brand_clean','specific_category','pack_size','price_per_item','subcat_item_median','per_item_premium_pct']].head(row_cap)
+        if not view.empty:
+            st.dataframe(view, use_container_width=True, column_config={'per_item_premium_pct': st.column_config.NumberColumn(format="%.1f%%")})
+            st.download_button("Download pack premium CSV", data=view.to_csv(index=False), file_name="pack_per_item_premium.csv")
 
     st.markdown("---")
 
-    # --- Pricing Opportunities ---
-    st.subheader("Pricing Opportunities")
-    # Choose subcategory focus
-    subcats_brand = df_brand['specific_category'].value_counts().index.tolist() if 'specific_category' in df_brand.columns else []
-    selected_subcat = st.selectbox("Subcategory", subcats_brand if subcats_brand else (df['specific_category'].value_counts().index.tolist() if 'specific_category' in df.columns else []))
-    sub_df = df[df['specific_category'] == selected_subcat] if selected_subcat else df.copy()
-    # Default competitors: top by SKU excluding selected brand
-    comp_pool = sub_df[sub_df['brand_clean'] != brand_of_interest]['brand_clean'].value_counts().index.tolist()
-    default_comps = comp_pool[:5]
-    selected_comps = st.multiselect("Competitors (up to 5)", comp_pool, default=default_comps, max_selections=5)
-    compare_brands = [brand_of_interest] + selected_comps if brand_of_interest else selected_comps
-    comp_df = sub_df[sub_df['brand_clean'].isin(compare_brands)].copy()
-    if not comp_df.empty:
-        # Summary table
-        summary = comp_df.groupby('brand_clean').agg(
-            median_pack_price=('final_price', 'median'),
-            median_item_price=('price_per_item', 'median'),
-            avg_discount=('discount_pct', 'mean')
-        ).reindex(compare_brands)
-        st.dataframe(
-            smart_style(summary.reset_index().rename(columns={'brand_clean': 'Brand'})),
-            use_container_width=True,
-            column_config={'avg_discount': st.column_config.NumberColumn(format="%.1f%%")}
-        )
-        # Band share chart within subcategory
-        if 'price_band_item' in comp_df.columns:
-            band_share = comp_df.groupby(['brand_clean', 'price_band_item']).size().groupby(level=0).apply(lambda s: s / s.sum()).reset_index(name='share')
-            band_share = band_share[band_share['brand_clean'].isin(compare_brands)]
-            fig = px.bar(
-                band_share,
-                x='price_band_item', y='share', color='brand_clean', barmode='group',
-                category_orders={'price_band_item': PRICE_LABELS},
-                labels={'price_band_item': 'Price Band (Item)', 'share': 'Share', 'brand_clean': 'Brand'}
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No competitor data available for this subcategory.")
+    # --- Pricing Opportunities (heavy) ---
+    compute_pricing = st.checkbox("Compute Pricing Opportunities", value=False, help="Enable to compare against competitors in subcategory")
+    if compute_pricing:
+        st.subheader("Pricing Opportunities")
+        # Choose subcategory focus
+        subcats_brand = df_brand['specific_category'].value_counts().index.tolist() if 'specific_category' in df_brand.columns else []
+        selected_subcat = st.selectbox("Subcategory", subcats_brand if subcats_brand else (df['specific_category'].value_counts().index.tolist() if 'specific_category' in df.columns else []))
+        sub_df_full = df[df['specific_category'] == selected_subcat] if selected_subcat else df
+        # Sample to cap to avoid OOM
+        sub_df = sub_df_full.sample(n=min(len(sub_df_full), sample_cap), random_state=0) if len(sub_df_full) > sample_cap else sub_df_full
+        # Default competitors: top by SKU excluding selected brand
+        comp_pool = sub_df[sub_df['brand_clean'] != brand_of_interest]['brand_clean'].value_counts().index.tolist()
+        default_comps = comp_pool[:5]
+        selected_comps = st.multiselect("Competitors (up to 5)", comp_pool, default=default_comps, max_selections=5)
+        compare_brands = [brand_of_interest] + selected_comps if brand_of_interest else selected_comps
+        comp_df = sub_df[sub_df['brand_clean'].isin(compare_brands)][['brand_clean','final_price','price_per_item','discount_pct','price_band_item']]
+        if not comp_df.empty:
+            summary = comp_df.groupby('brand_clean').agg(median_pack_price=('final_price', 'median'), median_item_price=('price_per_item', 'median'), avg_discount=('discount_pct', 'mean')).reindex(compare_brands)
+            st.dataframe(smart_style(summary.reset_index().rename(columns={'brand_clean': 'Brand'})), use_container_width=True, column_config={'avg_discount': st.column_config.NumberColumn(format="%.1f%%")})
+            if 'price_band_item' in comp_df.columns:
+                band_share = comp_df.groupby(['brand_clean','price_band_item']).size()
+                band_share = band_share.groupby(level=0).apply(lambda s: s / s.sum()).rename('share').reset_index()
+                fig = px.bar(band_share, x='price_band_item', y='share', color='brand_clean', barmode='group', category_orders={'price_band_item': PRICE_LABELS}, labels={'price_band_item': 'Price Band (Item)', 'share': 'Share', 'brand_clean': 'Brand'})
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No competitor data available for this subcategory.")
 
 def virtual_shopping_room(df):
     """
