@@ -41,6 +41,19 @@ px.defaults.template = 'simple_white'
 px.defaults.color_discrete_sequence = BRAND_PALETTE
 px.defaults.height = 360
 
+def style_fig(fig, title: Optional[str] = None):
+    fig.update_layout(
+        title=title,
+        font=dict(family='Inter, system-ui, -apple-system, Segoe UI, Roboto', size=14),
+        margin=dict(l=20, r=20, t=40, b=20),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        legend=dict(orientation='h', yanchor='bottom', y=-0.25, xanchor='center', x=0.5),
+    )
+    fig.update_xaxes(showline=True, linewidth=1, linecolor='#E5E7EB', mirror=False, gridcolor='#F1F5F9')
+    fig.update_yaxes(showline=False, gridcolor='#F1F5F9')
+    return fig
+
 # =====================
 # Data Cleaning Helpers
 # =====================
