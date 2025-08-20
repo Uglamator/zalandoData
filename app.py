@@ -8,6 +8,10 @@ import json
 import requests
 import io
 
+# ---- Constants (shared across tabs) ----
+PRICE_BINS = [0, 20, 30, 40, 50, 60, 1e6]
+PRICE_LABELS = ['<20€', '20-30€', '30-40€', '40-50€', '50-60€', '60€+']
+
 # =====================
 # Data Cleaning Helpers
 # =====================
@@ -382,7 +386,12 @@ def clean_price_columns(df):
     if 'initial_price' in df.columns and 'final_price' in df.columns:
         df['initial_price'] = pd.to_numeric(df['initial_price'], errors='coerce')
         df['final_price'] = pd.to_numeric(df['final_price'], errors='coerce')
-        df['discount_pct'] = ((df['initial_price'] - df['final_price']) / df['initial_price'] * 100).round(2)
+        valid = df['initial_price'] > 0
+        df['discount_pct'] = np.where(
+            valid,
+            ((df['initial_price'] - df['final_price']) / df['initial_price'] * 100).round(2),
+            0.0
+        )
     else:
         df['discount_pct'] = np.nan
     return df
@@ -433,7 +442,7 @@ def load_data():
     """
     try:
         # Use requests to reliably fetch the data, handling redirects
-        response = requests.get(RAW_CSV)
+        response = requests.get(RAW_CSV, timeout=15)
         response.raise_for_status()  # Raise an exception for bad responses (4xx or 5xx)
 
         # Read the cleaned CSV content directly into a DataFrame
@@ -525,11 +534,9 @@ def dashboard_tab(df):
     colA, colB = st.columns(2)
     with colA:
         st.markdown("**Price Band Mix (Per Item)**")
-        price_bins = [0, 20, 30, 40, 50, 60, 1e6]
-        price_labels = ['<20€', '20-30€', '30-40€', '40-50€', '50-60€', '60€+']
-        price_band_item = pd.cut(filtered['price_per_item'], bins=price_bins, labels=price_labels, right=False)
-        price_counts_item = price_band_item.value_counts().reindex(price_labels, fill_value=0)
-        st.plotly_chart(px.bar(x=price_labels, y=price_counts_item.values, labels={'x': 'Price Band (Per Item)', 'y': 'SKUs'}), use_container_width=True)
+        price_band_item = pd.cut(filtered['price_per_item'], bins=PRICE_BINS, labels=PRICE_LABELS, right=False)
+        price_counts_item = price_band_item.value_counts().reindex(PRICE_LABELS, fill_value=0)
+        st.plotly_chart(px.bar(x=PRICE_LABELS, y=price_counts_item.values, labels={'x': 'Price Band (Per Item)', 'y': 'SKUs'}), use_container_width=True)
     with colB:
         st.markdown("**Color Mix**")
         if 'color_clean' in filtered.columns:
@@ -564,6 +571,13 @@ def dashboard_tab(df):
                 st.write(f"Brand: {row['brand_clean']}")
                 if 'in_stock' in row:
                     st.write(f"In stock: {row['in_stock']}")
+        # Export button for current filtered view
+        st.download_button(
+            label="Download filtered dataset (CSV)",
+            data=filtered.to_csv(index=False),
+            file_name="dashboard_filtered.csv",
+            mime="text/csv"
+        )
     st.subheader("Most Out-of-Stock Products")
     if 'in_stock' in filtered.columns and 'total' in filtered.columns:
         filtered['in_stock_pct'] = (filtered['in_stock'] / filtered['total'] * 100).round(1)
@@ -644,15 +658,27 @@ def virtual_shopping_room(df):
             selected_colors = st.multiselect("Color(s)", color_options, default=[])
         else:
             selected_colors = []
-    # --- Price Range Slider (capped at 60 EUR, 60+ means everything above) ---
-    min_price = float(df['final_price'].min())
-    max_slider = 60.0 if df['final_price'].max() > 60 else float(df['final_price'].max())
-    price_range = st.slider("Price Range (€)", min_value=min_price, max_value=max_slider, value=(min_price, max_slider), step=1.0)
+    # --- Price mode toggle and range slider ---
+    price_mode = st.radio("Price mode", ["Pack price", "Price per item"], horizontal=True, index=0, key='price_mode')
+    price_column = 'final_price' if price_mode == 'Pack price' else 'price_per_item'
+    # Guard missing column (should be present after auto_clean_data)
+    if price_column not in df.columns:
+        df[price_column] = df['final_price']
+    min_price = float(pd.to_numeric(df[price_column], errors='coerce').min())
+    max_val = float(pd.to_numeric(df[price_column], errors='coerce').max())
+    max_slider = 60.0 if max_val > 60 else max_val
+    price_range = st.slider(
+        f"Price Range (€) — {price_mode}",
+        min_value=min_price,
+        max_value=max_slider,
+        value=(min_price, max_slider),
+        step=1.0
+    )
     filtered = df.copy()
     if price_range[1] == max_slider and max_slider == 60.0:
-        filtered = filtered[(filtered['final_price'] >= price_range[0])]
+        filtered = filtered[(filtered[price_column] >= price_range[0])]
     else:
-        filtered = filtered[(filtered['final_price'] >= price_range[0]) & (filtered['final_price'] <= price_range[1])]
+        filtered = filtered[(filtered[price_column] >= price_range[0]) & (filtered[price_column] <= price_range[1])]
     # --- Filtering ---
     if selected_category != 'All':
         filtered = filtered[filtered['category_clean'] == selected_category]
@@ -705,6 +731,13 @@ def virtual_shopping_room(df):
     # --- Product Gallery (Paginated Grid) ---
     page_size = 20
     total_products = len(filtered)
+    # Export of product viewer filtered dataset
+    st.download_button(
+        label="Download Product Viewer results (CSV)",
+        data=filtered.to_csv(index=False),
+        file_name="product_viewer_filtered.csv",
+        mime="text/csv"
+    )
     page = st.number_input("Page", min_value=1, max_value=max(1, (total_products-1)//page_size+1), value=1, step=1)
     start = (page-1)*page_size
     end = start+page_size
@@ -721,7 +754,7 @@ def virtual_shopping_room(df):
                 else:
                     st.write("No image")
                 st.markdown(f"**{prod['best_name']}**")
-                st.write(f"€{prod['final_price']:.2f}")
+                st.write(f"€{prod[price_column]:.2f}")
                 if prod.get('discount_pct', 0) > 0:
                     st.markdown(f"<span style='color:red;font-weight:bold'>-{prod['discount_pct']:.0f}%</span>", unsafe_allow_html=True)
                 if 'color_clean' in prod and pd.notna(prod['color_clean']):
@@ -742,7 +775,7 @@ def virtual_shopping_room(df):
             img_url = prod.get('main_image')
             if img_url and pd.notna(img_url) and str(img_url).startswith('http'):
                 st.image(img_url, width=200)
-            st.write(f"Price: €{prod['final_price']:.2f}")
+            st.write(f"Price: €{prod[price_column]:.2f}")
             st.write(f"Discount: {prod['discount_pct']:.1f}%")
             st.write(f"Brand: {prod['brand_clean']}")
             st.write(f"Category: {prod['category_clean']} | {prod['specific_category']}")
@@ -873,16 +906,29 @@ def category_deep_dives(df):
     if selected_brand != 'All' and selected_brand not in top_brands:
         top_brands.append(selected_brand)
     avg_price_by_brand = cat_df[cat_df['brand_clean'].isin(top_brands)].groupby('brand_clean')['final_price'].mean().reindex(top_brands)
-    highlight_color = ['#e74c3c' if b == selected_brand else '#3498db' for b in avg_price_by_brand.index]
-    fig_price = px.bar(x=avg_price_by_brand.index, y=avg_price_by_brand.values, color=avg_price_by_brand.index,
-                      color_discrete_sequence=highlight_color,
-                      labels={'x': 'Brand', 'y': 'Avg Price (€)'}, title="Average Price by Brand")
+    color_map = {b: ('#e74c3c' if b == selected_brand else '#3498db') for b in avg_price_by_brand.index}
+    fig_price = px.bar(
+        x=avg_price_by_brand.index,
+        y=avg_price_by_brand.values,
+        color=avg_price_by_brand.index,
+        category_orders={'x': list(avg_price_by_brand.index)},
+        color_discrete_map=color_map,
+        labels={'x': 'Brand', 'y': 'Avg Price (€)'},
+        title="Average Price by Brand"
+    )
     st.plotly_chart(fig_price, use_container_width=True)
     # --- SKU Count by Brand (top 10 + selected) ---
     sku_count_by_brand = cat_df[cat_df['brand_clean'].isin(top_brands)].groupby('brand_clean').size().reindex(top_brands)
-    fig_count = px.bar(x=sku_count_by_brand.index, y=sku_count_by_brand.values, color=sku_count_by_brand.index,
-                      color_discrete_sequence=highlight_color,
-                      labels={'x': 'Brand', 'y': 'SKU Count'}, title="SKU Count by Brand")
+    color_map_counts = {b: ('#e74c3c' if b == selected_brand else '#3498db') for b in sku_count_by_brand.index}
+    fig_count = px.bar(
+        x=sku_count_by_brand.index,
+        y=sku_count_by_brand.values,
+        color=sku_count_by_brand.index,
+        category_orders={'x': list(sku_count_by_brand.index)},
+        color_discrete_map=color_map_counts,
+        labels={'x': 'Brand', 'y': 'SKU Count'},
+        title="SKU Count by Brand"
+    )
     st.plotly_chart(fig_count, use_container_width=True)
     # --- Color Mix: Separate Bar Charts, Top 10 Colors by Category/Subcategory ---
     st.markdown("**Color Mix (SKU Count)**")
@@ -899,12 +945,10 @@ def category_deep_dives(df):
     st.plotly_chart(fig_brand_color, use_container_width=True)
     # --- Price Band Mix (side-by-side barchart) ---
     st.markdown("**Price Band Mix**")
-    price_bins = [0, 20, 30, 40, 50, 60, 1e6]
-    price_labels = ['<20€', '20-30€', '30-40€', '40-50€', '50-60€', '60€+']
-    brand_band = pd.cut(filtered['final_price'], bins=price_bins, labels=price_labels, right=False)
-    cat_band = pd.cut(cat_df['final_price'], bins=price_bins, labels=price_labels, right=False)
-    band_df = pd.DataFrame({selected_brand: brand_band.value_counts(normalize=True).reindex(price_labels, fill_value=0),
-                           'Category': cat_band.value_counts(normalize=True).reindex(price_labels, fill_value=0)}, index=price_labels)
+    brand_band = pd.cut(filtered['final_price'], bins=PRICE_BINS, labels=PRICE_LABELS, right=False)
+    cat_band = pd.cut(cat_df['final_price'], bins=PRICE_BINS, labels=PRICE_LABELS, right=False)
+    band_df = pd.DataFrame({selected_brand: brand_band.value_counts(normalize=True).reindex(PRICE_LABELS, fill_value=0),
+                           'Category': cat_band.value_counts(normalize=True).reindex(PRICE_LABELS, fill_value=0)}, index=PRICE_LABELS)
     fig_band = px.bar(band_df.reset_index(), x='index', y=[selected_brand, 'Category'], barmode='group',
                      labels={'value': 'Share', 'index': 'Price Band'}, title="Price Band Mix: Brand vs. Category")
     st.plotly_chart(fig_band, use_container_width=True)
@@ -955,16 +999,29 @@ def deep_dive_by_specific_category(df):
     if selected_brand != 'All' and selected_brand not in top_brands:
         top_brands.append(selected_brand)
     avg_price_by_brand = subcat_df[subcat_df['brand_clean'].isin(top_brands)].groupby('brand_clean')['final_price'].mean().reindex(top_brands)
-    highlight_color = ['#e74c3c' if b == selected_brand else '#3498db' for b in avg_price_by_brand.index]
-    fig_price = px.bar(x=avg_price_by_brand.index, y=avg_price_by_brand.values, color=avg_price_by_brand.index,
-                      color_discrete_sequence=highlight_color,
-                      labels={'x': 'Brand', 'y': 'Avg Price (€)'}, title="Average Price by Brand")
+    color_map = {b: ('#e74c3c' if b == selected_brand else '#3498db') for b in avg_price_by_brand.index}
+    fig_price = px.bar(
+        x=avg_price_by_brand.index,
+        y=avg_price_by_brand.values,
+        color=avg_price_by_brand.index,
+        category_orders={'x': list(avg_price_by_brand.index)},
+        color_discrete_map=color_map,
+        labels={'x': 'Brand', 'y': 'Avg Price (€)'},
+        title="Average Price by Brand"
+    )
     st.plotly_chart(fig_price, use_container_width=True)
     # --- SKU Count by Brand (top 10 + selected) ---
     sku_count_by_brand = subcat_df[subcat_df['brand_clean'].isin(top_brands)].groupby('brand_clean').size().reindex(top_brands)
-    fig_count = px.bar(x=sku_count_by_brand.index, y=sku_count_by_brand.values, color=sku_count_by_brand.index,
-                      color_discrete_sequence=highlight_color,
-                      labels={'x': 'Brand', 'y': 'SKU Count'}, title="SKU Count by Brand")
+    color_map_counts = {b: ('#e74c3c' if b == selected_brand else '#3498db') for b in sku_count_by_brand.index}
+    fig_count = px.bar(
+        x=sku_count_by_brand.index,
+        y=sku_count_by_brand.values,
+        color=sku_count_by_brand.index,
+        category_orders={'x': list(sku_count_by_brand.index)},
+        color_discrete_map=color_map_counts,
+        labels={'x': 'Brand', 'y': 'SKU Count'},
+        title="SKU Count by Brand"
+    )
     st.plotly_chart(fig_count, use_container_width=True)
     # --- Color Mix (side-by-side barchart, absolute SKU count) ---
     st.markdown("**Color Mix (SKU Count)**")
@@ -978,12 +1035,10 @@ def deep_dive_by_specific_category(df):
     st.plotly_chart(fig_color, use_container_width=True)
     # --- Price Band Mix (side-by-side barchart) ---
     st.markdown("**Price Band Mix**")
-    price_bins = [0, 20, 30, 40, 50, 60, 1e6]
-    price_labels = ['<20€', '20-30€', '30-40€', '40-50€', '50-60€', '60€+']
-    brand_band = pd.cut(filtered['final_price'], bins=price_bins, labels=price_labels, right=False)
-    subcat_band = pd.cut(subcat_df['final_price'], bins=price_bins, labels=price_labels, right=False)
-    band_df = pd.DataFrame({selected_brand: brand_band.value_counts(normalize=True).reindex(price_labels, fill_value=0),
-                           'Subcategory': subcat_band.value_counts(normalize=True).reindex(price_labels, fill_value=0)}, index=price_labels)
+    brand_band = pd.cut(filtered['final_price'], bins=PRICE_BINS, labels=PRICE_LABELS, right=False)
+    subcat_band = pd.cut(subcat_df['final_price'], bins=PRICE_BINS, labels=PRICE_LABELS, right=False)
+    band_df = pd.DataFrame({selected_brand: brand_band.value_counts(normalize=True).reindex(PRICE_LABELS, fill_value=0),
+                           'Subcategory': subcat_band.value_counts(normalize=True).reindex(PRICE_LABELS, fill_value=0)}, index=PRICE_LABELS)
     fig_band = px.bar(band_df.reset_index(), x='index', y=[selected_brand, 'Subcategory'], barmode='group',
                      labels={'value': 'Share', 'index': 'Price Band'}, title="Price Band Mix: Brand vs. Subcategory")
     st.plotly_chart(fig_band, use_container_width=True)
@@ -1264,7 +1319,6 @@ def brand_performance_tab(df):
             return '<70%'
     sku_instock_df['instock_bucket'] = sku_instock_df['in_stock_pct'].apply(bucket_instock)
     bucket_counts = sku_instock_df['instock_bucket'].value_counts().sort_index()
-    import plotly.express as px
     fig_pie = px.pie(bucket_counts, names=bucket_counts.index, values=bucket_counts.values, title='SKU In-stock Rate Buckets')
     col1, col2 = st.columns(2)
     with col1:
@@ -1319,6 +1373,13 @@ def brand_performance_tab(df):
     col2.metric("Avg Price", f"€{brand_df['final_price'].mean():.2f}")
     col3.metric("Avg Discount", f"{brand_df['discount_pct'].mean():.2f}%")
     col4.metric("# Categories", f"{brand_df['category_clean'].nunique()}")
+    # Export brand-specific filtered dataset
+    st.download_button(
+        label="Download Brand Performance dataset (CSV)",
+        data=brand_df.to_csv(index=False),
+        file_name="brand_performance_filtered.csv",
+        mime="text/csv"
+    )
 
 def show_user_guide():
     st.markdown("""
@@ -1400,6 +1461,45 @@ def main():
             if st.button("Close Guide"):
                 st.session_state['show_guide'] = False
     df = load_data()
+    # Ensure derived columns exist and are consistent
+    if not df.empty:
+        df = auto_clean_data(df)
+
+    # ---- Global Filters (Sidebar) ----
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("**Global Filters**")
+        categories = ['All'] + sorted(df['category_clean'].dropna().unique()) if not df.empty else ['All']
+        selected_global_category = st.selectbox("Category (Global)", categories, index=0, key='global_category')
+        if selected_global_category != 'All':
+            subcats = ['All'] + sorted(df[df['category_clean'] == selected_global_category]['specific_category'].dropna().unique())
+        else:
+            subcats = ['All'] + (sorted(df['specific_category'].dropna().unique()) if not df.empty else [])
+        selected_global_subcat = st.selectbox("Subcategory (Global)", subcats, index=0, key='global_subcat')
+        brands = ['All'] + (sorted(df['brand_clean'].dropna().unique()) if not df.empty else [])
+        selected_global_brand = st.selectbox("Brand (Global)", brands, index=0, key='global_brand')
+        color_options = sorted(df['color_clean'].dropna().unique()) if (not df.empty and 'color_clean' in df.columns) else []
+        selected_global_colors = st.multiselect("Color(s) (Global)", color_options, default=[], key='global_colors')
+        if st.button("Reset Global Filters"):
+            st.session_state['global_category'] = 'All'
+            st.session_state['global_subcat'] = 'All'
+            st.session_state['global_brand'] = 'All'
+            st.session_state['global_colors'] = []
+            st.rerun()
+
+    # Apply global filters
+    df_filtered = df.copy()
+    if not df_filtered.empty:
+        if selected_global_category != 'All':
+            df_filtered = df_filtered[df_filtered['category_clean'] == selected_global_category]
+        if selected_global_subcat != 'All':
+            df_filtered = df_filtered[df_filtered['specific_category'] == selected_global_subcat]
+        if selected_global_brand != 'All':
+            df_filtered = df_filtered[df_filtered['brand_clean'] == selected_global_brand]
+        if selected_global_colors:
+            if 'color_clean' in df_filtered.columns:
+                df_filtered = df_filtered[df_filtered['color_clean'].isin(selected_global_colors)]
+
     # --- Tab order and names ---
     tab_labels = [
         "🏠 Dashboard",
@@ -1410,15 +1510,15 @@ def main():
     ]
     tabs = st.tabs(tab_labels)
     with tabs[0]:
-        dashboard_tab(df)
+        dashboard_tab(df_filtered)
     with tabs[1]:
-        brand_performance_tab(df)
+        brand_performance_tab(df_filtered)
     with tabs[2]:
-        brand_comparison_tab(df)
+        brand_comparison_tab(df_filtered)
     with tabs[3]:
-        zalando_performance_tab(df)
+        zalando_performance_tab(df_filtered)
     with tabs[4]:
-        virtual_shopping_room(df)
+        virtual_shopping_room(df_filtered)
 
 if __name__ == "__main__":
     main() 
