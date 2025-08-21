@@ -41,6 +41,12 @@ px.defaults.template = 'simple_white'
 px.defaults.color_discrete_sequence = BRAND_PALETTE
 px.defaults.height = 360
 
+# Generic slugs that are not specific enough for lingerie subcategorization
+GENERIC_SLUGS_GLOBAL = {
+    'womens-clothing-underwear', 'womens clothing underwear', 'lingerie', 'underwear',
+    'trousers'
+}
+
 def style_fig(fig, title: Optional[str] = None):
     fig.update_layout(
         title=title,
@@ -148,6 +154,8 @@ SPECIFIC_CATEGORY_MAP = {
     'briefs': 'Brief',
     'panty': 'Brief',
     'panties': 'Brief',
+    'knicker': 'Brief',
+    'knickers': 'Brief',
     'tanga': 'Tanga',
     'hipster': 'Hipster',
     'brazilian': 'Brazilian',
@@ -162,6 +170,7 @@ SPECIFIC_CATEGORY_MAP = {
     'boyshort': 'Shorts',
     'boyshorts': 'Shorts',
     'period-panties': 'Period Panties',
+    'pants': 'Brief',
     # Shapewear
     'shapewear': 'Shapewear',
     'body': 'Body',
@@ -203,7 +212,7 @@ SPECIFIC_CATEGORY_MAP = {
     'socks': 'Socks',
     'knee-highs': 'Socks',
     'leggings': 'Leggings',
-    # Swimwear (if present)
+    # Swimwear
     'bikini': 'Bikini',
     'bikini-top': 'Bikini Top',
     'bikini-bottom': 'Bikini Bottom',
@@ -266,8 +275,18 @@ def extract_slug_from_path(di: str) -> str:
             di = url
         if isinstance(di, str):
             parts = [p for p in di.split('/') if p]
-            slug = parts[-2] if parts and parts[-1].endswith('.html') and len(parts) > 1 else (parts[-1] if parts else '')
-            return slug
+            if not parts:
+                return ''
+            last = parts[-1]
+            # If last is a file, use the parent
+            if last.endswith('.html') and len(parts) > 1:
+                last = parts[-2]
+            # If last is generic (e.g., pants), step back one more if possible
+            last_norm = _normalize_text_basic(last)
+            if last_norm in GENERIC_SLUGS_GLOBAL and len(parts) > 2:
+                candidate = parts[-3]
+                return candidate
+            return last
     except Exception:
         return ''
     return ''
@@ -480,6 +499,9 @@ def clean_category_columns(df):
         # 4) Try best_name then name
         if not spec:
             spec = extract_specific_category(best_name) or extract_specific_category(name)
+        # 4b) Try name inference rules
+        if not spec:
+            spec = infer_specific_from_name(best_name) or infer_specific_from_name(name)
         # 5) Default to pretty slug if available, else 'Other'
         if not spec:
             any_slug = extract_slug_from_path(disc) or extract_slug_from_path(product_url)
@@ -2119,6 +2141,114 @@ def _db_status_widget():
             except Exception:
                 count_txt = "Error"
         st.metric(label="Rows", value=count_txt)
+
+def infer_specific_from_name(text: Optional[str]) -> Optional[str]:
+    if not text or not isinstance(text, str):
+        return None
+    t = _normalize_text_basic(text)
+    # Bras (order matters: more specific first)
+    if 'sports' in t and 'bra' in t:
+        return 'Sports Bra'
+    if 'balconette' in t:
+        return 'Balconette Bra'
+    if 'plunge' in t:
+        return 'Plunge Bra'
+    if 'push up' in t or 'pushup' in t:
+        return 'Push-up Bra'
+    if 't shirt' in t and 'bra' in t:
+        return 'T-shirt Bra'
+    if 'strapless' in t:
+        return 'Strapless Bra'
+    if 'wireless' in t or ('wire free' in t):
+        return 'Wireless Bra'
+    if 'bralette' in t:
+        return 'Bralette'
+    if 'minimizer' in t:
+        return 'Minimizer Bra'
+    if 'bustier' in t:
+        return 'Bustier'
+    if 'maternity' in t or 'nursing' in t:
+        return 'Maternity Bra'
+    if 'triangle' in t:
+        return 'Triangle Bra'
+    if 'underwired' in t and 'bra' in t:
+        return 'Underwired Bra'
+    # Underwear
+    if 'g string' in t or 'gstring' in t or 'string' in t:
+        return 'G-String'
+    if 'thong' in t:
+        return 'Thong'
+    if 'tanga' in t:
+        return 'Tanga'
+    if 'hipster' in t:
+        return 'Hipster'
+    if 'brazilian' in t:
+        return 'Brazilian'
+    if 'boxer' in t:
+        return 'Boxer'
+    if 'boyshort' in t or ('boy short' in t):
+        return 'Shorts'
+    if 'short' in t and 'boy' in t:
+        return 'Shorts'
+    if 'brief' in t or 'panty' in t or 'panties' in t or 'slip' in t or 'pants' in t:
+        return 'Brief'
+    if 'period' in t and ('pant' in t or 'brief' in t):
+        return 'Period Panties'
+    # Bodysuits & Corsetry
+    if 'bodysuit' in t or t.startswith('body ' ) or t.endswith(' body') or t == 'body':
+        return 'Body'
+    if 'corset' in t or 'girdle' in t or 'cincher' in t:
+        return 'Corset'
+    # Nightwear
+    if 'pyjama' in t or 'pajama' in t or 'nightdress' in t or 'nightgown' in t or 'nightshirt' in t:
+        return 'Nightdress'
+    if 'babydoll' in t:
+        return 'Babydoll'
+    if 'chemise' in t:
+        return 'Chemise'
+    if 'robe' in t or 'dressing gown' in t:
+        return 'Robe'
+    # Tops
+    if 'tank' in t and 'top' in t:
+        return 'Tank Top'
+    if 'camisole' in t:
+        return 'Camisole'
+    if 'undershirt' in t:
+        return 'Undershirt'
+    if 'crop' in t and 'top' in t:
+        return 'Crop Top'
+    if t.endswith(' top') or t.startswith('top '):
+        return 'Top'
+    # Hosiery
+    if 'tights' in t:
+        return 'Tights'
+    if 'stockings' in t:
+        return 'Stockings'
+    if 'hold ups' in t or 'holdups' in t:
+        return 'Hold-Ups'
+    if 'socks' in t or 'knee highs' in t:
+        return 'Socks'
+    if 'leggings' in t:
+        return 'Leggings'
+    # Swimwear
+    if 'bikini' in t and 'top' in t:
+        return 'Bikini Top'
+    if 'bikini' in t and 'bottom' in t:
+        return 'Bikini Bottom'
+    if 'bikini' in t:
+        return 'Bikini'
+    if 'swimsuit' in t or 'one piece' in t:
+        return 'Swimsuit'
+    if 'tankini' in t:
+        return 'Tankini'
+    # Accessories
+    if 'suspenders' in t:
+        return 'Suspenders'
+    if 'garter' in t:
+        return 'Garter'
+    if 'pasties' in t:
+        return 'Pasties'
+    return None
 
 # --- Main App ---
 def main():
