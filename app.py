@@ -221,15 +221,10 @@ SPECIFIC_CATEGORY_MAP = {
 def extract_main_category(text):
     if not isinstance(text, str):
         return None
-    text_lc = text.lower()
-    # Try to extract from discovery_input first
+    text_norm = _normalize_text_basic(text)
     for k, v in MAIN_CATEGORY_MAP.items():
-        if k in text_lc:
-            return v
-    # Try again without hyphens
-    text_lc_nohyphen = text_lc.replace('-', ' ')
-    for k, v in MAIN_CATEGORY_MAP.items():
-        if k in text_lc_nohyphen:
+        k_norm = _normalize_text_basic(k)
+        if k_norm in text_norm:
             return v
     return None
 
@@ -413,6 +408,45 @@ def clean_name_columns(df):
     df['best_name'] = df['product_name_clean'].fillna(df['name_clean']).fillna(df.get('product_name', '')).fillna(df.get('name', ''))
     return df
 
+def _derive_main_from_specific(specific_label: Optional[str]) -> Optional[str]:
+    if not specific_label or not isinstance(specific_label, str):
+        return None
+    s = _normalize_text_basic(specific_label)
+    # Bras
+    if any(tok in s for tok in ["bra", "bralette", "balconette", "plunge", "push", "strapless", "wireless", "t shirt bra", "minimizer", "longline", "maternity", "nursing", "multiway", "front", "convertible", "full cup", "demi", "shelf", "side support", "bustier"]):
+        # Sports Bra is a separate main
+        if "sports" in s:
+            return "Sports Bras"
+        return "Bras"
+    # Underwear
+    if any(tok in s for tok in ["brief", "pant", "thong", "tanga", "hipster", "brazilian", "g string", "slip", "boxer", "short", "boyshort", "period"]):
+        return "Underwear"
+    # Bodysuits & Corsetry
+    if any(tok in s for tok in ["body", "bodies", "corset", "bustier", "waist"]):
+        return "Bodysuits & Corsetry"
+    # Shapewear
+    if any(tok in s for tok in ["shapewear", "girdle", "cincher"]):
+        return "Shapewear"
+    # Lingerie Sets
+    if "lingerie set" in s or s == "set":
+        return "Lingerie Sets"
+    # Nightwear
+    if any(tok in s for tok in ["pyjama", "pajama", "nightdress", "nightgown", "nightshirt", "babydoll", "chemise", "robe", "dressing gown"]):
+        return "Nightwear"
+    # Tops
+    if any(tok in s for tok in ["tank", "top", "sweater", "undershirt", "camisole", "crop"]):
+        return "Tops"
+    # Hosiery
+    if any(tok in s for tok in ["tights", "stockings", "hold ups", "socks", "knee highs", "leggings"]):
+        return "Hosiery"
+    # Swimwear
+    if any(tok in s for tok in ["bikini", "swimsuit", "one piece", "tankini"]):
+        return "Swimwear"
+    # Accessories
+    if any(tok in s for tok in ["suspenders", "garter", "pasties", "accessories"]):
+        return "Accessories"
+    return None
+
 def clean_category_columns(df):
     # Build dynamic subcategory augmentation from data
     dynamic_specific_map = build_dynamic_specific_map(df)
@@ -421,6 +455,7 @@ def clean_category_columns(df):
         disc = row.get('discovery_input', '')
         name = row.get('name', '')
         main_cat = extract_main_category(disc)
+        # Ignore overly generic slugs; defer to name/specific
         if (not main_cat) or (isinstance(disc, str) and _normalize_text_basic(disc) in GENERIC_SLUGS):
             main_cat = extract_main_category(name)
         return main_cat
@@ -450,8 +485,21 @@ def clean_category_columns(df):
             any_slug = extract_slug_from_path(disc) or extract_slug_from_path(product_url)
             spec = make_pretty_specific_label(_normalize_text_basic(any_slug)) if any_slug else 'Other'
         return spec
-    df['category_clean'] = df.apply(get_main_cat, axis=1)
-    df['specific_category'] = df.apply(get_spec_cat, axis=1)
+    # Compute candidates
+    computed_spec = df.apply(get_spec_cat, axis=1)
+    # Prefer deriving main from specific where possible
+    derived_main_from_spec = computed_spec.map(_derive_main_from_specific)
+    fallback_main = df.apply(get_main_cat, axis=1)
+    final_main = derived_main_from_spec.where(derived_main_from_spec.notna(), fallback_main)
+    # Respect existing values when present
+    if 'category_clean' in df.columns:
+        df['category_clean'] = df['category_clean'].where(df['category_clean'].notna() & (df['category_clean'] != ''), final_main)
+    else:
+        df['category_clean'] = final_main
+    if 'specific_category' in df.columns:
+        df['specific_category'] = df['specific_category'].where(df['specific_category'].notna() & (df['specific_category'] != ''), computed_spec)
+    else:
+        df['specific_category'] = computed_spec
     return df
 
 def clean_color_column(df):
